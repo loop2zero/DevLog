@@ -16,6 +16,7 @@ test("tick finalizes first, then dispatches each trigger issue exactly once acro
     db, client, watch: w, stateIds: { inProgress: "IP", review: "RV" },
     onDispatch: async (iss: any) => { dispatched.push(iss.id); db.prepare("INSERT INTO tasks (id, project_id, title, status, linear_issue_id) VALUES (?,?,?,?,?)").run("t-" + iss.id, "r", "t", "in_progress", iss.id); },
     finalize: async () => { finalizeCalls++; },
+    reconcile: async () => {},
   };
   await tick(deps);
   await tick(deps);
@@ -28,7 +29,22 @@ test("tick skips issues already linked to a task", async () => {
   db.prepare("INSERT INTO tasks (id, project_id, title, status, linear_issue_id) VALUES (?,?,?,?,?)").run("t0", "r", "t", "in_progress", "i1");
   const client: any = { async fetchTriggerIssues() { return [mkIssue("i1")]; } };
   const dispatched: string[] = [];
-  const deps: any = { db, client, watch: w, stateIds: { inProgress: "IP", review: "RV" }, onDispatch: async (iss: any) => { dispatched.push(iss.id); }, finalize: async () => {} };
+  const deps: any = { db, client, watch: w, stateIds: { inProgress: "IP", review: "RV" }, onDispatch: async (iss: any) => { dispatched.push(iss.id); }, finalize: async () => {}, reconcile: async () => {} };
   await tick(deps);
   assert.equal(dispatched.length, 0);
+});
+
+test("tick calls reconcile each cycle", async () => {
+  const db = makeTestDb();
+  let reconciled = 0;
+  await tick({
+    db,
+    client: { fetchTriggerIssues: async () => [] },
+    watch: normalizeWatchConfig({ projectSlugId: "p", devlogProjectId: "r" }),
+    onDispatch: async () => {},
+    finalize: async () => {},
+    reconcile: async () => { reconciled++; },
+    stateIds: { trigger: "t", inProgress: "ip", review: "rv", done: "d", parked: "b", parkedName: "Backlog" },
+  } as any);
+  assert.equal(reconciled, 1);
 });

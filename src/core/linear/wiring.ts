@@ -68,6 +68,8 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
       client,
       watch: w,
       stateIds,
+      // TODO(task 11): wire reconcileBreakdowns
+      reconcile: async () => {},
       onDispatch: async (issue) => {
         const res = await dispatchIssue(db, issue, w, executeTask);
         // Always move to In Progress — the issue was claimed regardless of launch outcome.

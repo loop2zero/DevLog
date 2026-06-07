@@ -9,11 +9,13 @@ export interface TickDeps {
   watch: LinearWatchConfig;
   onDispatch: (issue: LinearIssue) => Promise<void>;
   finalize: () => Promise<void>;
+  reconcile: () => Promise<void>;
   stateIds: { inProgress: string; review: string };
 }
 
 export async function tick(deps: TickDeps): Promise<void> {
   await deps.finalize();
+  await deps.reconcile();
   const issues = await deps.client.fetchTriggerIssues(deps.watch.projectSlugId, deps.watch.triggerState);
   for (const issue of issues) {
     if (alreadyLinked(deps.db, issue.id)) continue;
