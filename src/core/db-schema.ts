@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   blocked_by TEXT,
   sandbox_iterations INTEGER NOT NULL DEFAULT 0,
   fail_reason TEXT,
+  linear_issue_id TEXT,
+  linear_identifier TEXT,
+  linear_workpad_comment_id TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   completed_at TEXT

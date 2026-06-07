@@ -37,6 +37,7 @@ export function getDb(): Database.Database {
   _db.pragma("foreign_keys = ON");
   _db.exec(SCHEMA);
   migrateTasksV2(_db);
+  migrateLinearColumns(_db);
 
   // Migrate: add claude_session_id column if missing
   try {
@@ -211,6 +212,13 @@ export function getDb(): Database.Database {
   }
 
   return _db;
+}
+
+export function migrateLinearColumns(db: Database.Database): void {
+  const cols = (db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>).map((c) => c.name);
+  if (!cols.includes("linear_issue_id")) db.exec("ALTER TABLE tasks ADD COLUMN linear_issue_id TEXT");
+  if (!cols.includes("linear_identifier")) db.exec("ALTER TABLE tasks ADD COLUMN linear_identifier TEXT");
+  if (!cols.includes("linear_workpad_comment_id")) db.exec("ALTER TABLE tasks ADD COLUMN linear_workpad_comment_id TEXT");
 }
 
 export function migrateTasksV2(db: Database.Database): void {

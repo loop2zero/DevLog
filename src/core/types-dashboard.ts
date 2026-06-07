@@ -25,6 +25,9 @@ export interface Task {
   blocked_by?: string | null; // JSON array of task ids when status === 'in_queue'
   sandbox_iterations?: number;
   fail_reason?: string | null;
+  linear_issue_id?: string | null;
+  linear_identifier?: string | null;
+  linear_workpad_comment_id?: string | null;
 }
 
 export type SessionStatus =
