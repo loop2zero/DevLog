@@ -194,6 +194,10 @@ export function buildClaudeProcessArgs(
     "--verbose",
   ];
 
+  if (runtimeAuthConfig.unattended) {
+    args.push("--dangerously-skip-permissions");
+  }
+
   if (runtimeAuthConfig.model !== DEFAULT_AGENT_MODEL) {
     args.push("--model", runtimeAuthConfig.model);
   }

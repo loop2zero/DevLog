@@ -54,7 +54,7 @@ export type ExecuteResult = ExecuteSuccess | ExecuteError;
 export function buildEngineExecuteInput(
   engine: "claude" | "codex",
 ): SessionRuntimeAuthInput {
-  return { local_cli_agent_id: engine };
+  return { local_cli_agent_id: engine, unattended: true };
 }
 
 // ---------------------------------------------------------------------------

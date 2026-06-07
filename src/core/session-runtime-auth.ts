@@ -48,6 +48,7 @@ export interface SessionRuntimeAuthInput {
   agent_max_tokens?: number | string | null;
   anthropic_api_key?: string | null;
   local_cli_agent_env?: unknown;
+  unattended?: boolean;
 }
 
 export interface SessionRuntimeAuthConfig {
@@ -65,6 +66,7 @@ export interface SessionRuntimeAuthConfig {
   maxTokens: number;
   anthropicApiKey: string | null;
   usesLegacyEnvVar: boolean;
+  unattended: boolean;
 }
 
 export const DEFAULT_SESSION_AUTH_MODE: SessionRuntimeAuthMode =
@@ -163,6 +165,9 @@ export function getSessionRuntimeAuthInputFromPayload(
     local_cli_agent_env: isRecord(record.local_cli_agent_env)
       ? record.local_cli_agent_env
       : null,
+    ...(typeof record.unattended === "boolean"
+      ? { unattended: record.unattended }
+      : {}),
   };
 }
 
@@ -348,6 +353,7 @@ export function resolveSessionRuntimeAuthConfig(
         ? sanitizeEnvVarName(input.agent_api_key_env_var)
         : null,
     usesLegacyEnvVar: legacyEnvVar,
+    unattended: input.unattended === true,
   };
 }
 
