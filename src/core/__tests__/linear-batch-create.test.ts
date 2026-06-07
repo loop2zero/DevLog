@@ -101,3 +101,17 @@ test("runBreakdown is self-idempotent: a second call is a no-op", async () => {
   const count: any = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE linear_issue_id='p1'").get();
   assert.equal(count.n, 1); // exactly one parent row, no duplicate
 });
+
+test("runBreakdown never applies the breakdown label to a created sub", async () => {
+  const db = makeTestDb();
+  // teamAndLabels maps the breakdown label too, to prove it's filtered out, not just unmapped
+  const tl = { teamId: "team1", labels: { claude: "lc", "design-breakdown": "lbd" } };
+  const repo = tmpRepoWith({ parentSummary: "r", subIssues: [
+    { title: "A", description: "", labels: ["claude", "design-breakdown"] },
+  ] });
+  const w = normalizeWatchConfig({ projectSlugId: "p", devlogProjectId: "repo1" });
+  const { client, calls } = fakeClient();
+  const res = await runBreakdown({ db, client: client as any, w, parent, repoRoot: repo, stateIds, teamAndLabels: tl });
+  assert.equal(res.ok, true);
+  assert.deepEqual(calls.created[0].input.labelIds, ["lc"]); // "lbd" (breakdown label id) excluded
+});

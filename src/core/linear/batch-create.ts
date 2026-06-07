@@ -65,6 +65,7 @@ export async function runBreakdown(deps: RunBreakdownDeps): Promise<RunBreakdown
       childIdentifier = reuse.identifier;
     } else {
       const labelIds = sub.labels
+        .filter((l) => l.trim().toLowerCase() !== deps.w.breakdownLabel)
         .map((l) => teamAndLabels.labels[l.trim().toLowerCase()])
         .filter((x): x is string => typeof x === "string");
       const out = await client.createIssue({
