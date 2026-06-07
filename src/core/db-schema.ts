@@ -115,8 +115,11 @@ CREATE TABLE IF NOT EXISTS linear_breakdown_subs (
   child_identifier TEXT,
   position INTEGER NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(parent_issue_id, position)
+  UNIQUE(parent_issue_id, position),
+  UNIQUE(parent_issue_id, child_issue_id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_breakdown_subs_parent ON linear_breakdown_subs(parent_issue_id, position);
 
 CREATE VIEW IF NOT EXISTS active_conflicts AS
 SELECT

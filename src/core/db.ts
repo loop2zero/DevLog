@@ -235,7 +235,8 @@ export function migrateBreakdownTable(db: Database.Database): void {
     child_identifier TEXT,
     position INTEGER NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(parent_issue_id, position)
+    UNIQUE(parent_issue_id, position),
+    UNIQUE(parent_issue_id, child_issue_id)
   )`);
 }
 

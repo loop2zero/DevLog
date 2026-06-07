@@ -10,6 +10,7 @@ test("migrateLinearColumns adds linear_breakdown_done_at to a bare tasks table",
   migrateLinearColumns(db);
   const cols = (db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>).map((c) => c.name);
   assert.ok(cols.includes("linear_breakdown_done_at"));
+  assert.ok(cols.includes("linear_finalized_at"));
 });
 
 test("migrateBreakdownTable creates linear_breakdown_subs and is idempotent", () => {
@@ -22,6 +23,15 @@ test("migrateBreakdownTable creates linear_breakdown_subs and is idempotent", ()
   const row: any = db.prepare("SELECT * FROM linear_breakdown_subs WHERE child_issue_id='c'").get();
   assert.equal(row.position, 1);
   assert.equal(row.parent_issue_id, "p");
+  assert.ok(row.created_at);
+});
+
+test("linear_breakdown_subs rejects the same child twice in one parent", () => {
+  const db = makeTestDb();
+  db.prepare("INSERT INTO linear_breakdown_subs (parent_issue_id, child_issue_id, child_identifier, position) VALUES ('p','c','ARC-2',0)").run();
+  assert.throws(() =>
+    db.prepare("INSERT INTO linear_breakdown_subs (parent_issue_id, child_issue_id, child_identifier, position) VALUES ('p','c','ARC-2',1)").run(),
+  );
 });
 
 test("fresh SCHEMA db already has the breakdown column and table", () => {
