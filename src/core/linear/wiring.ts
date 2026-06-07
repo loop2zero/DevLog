@@ -55,6 +55,13 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
             "SELECT s.branch_name as branch, s.worktree_path as wp, s.local_cli_agent_id as engine FROM tasks t LEFT JOIN sessions s ON s.id = t.session_id WHERE t.linear_issue_id = ?",
           )
           .get(issue.id) as { branch?: string; wp?: string; engine?: string } | undefined;
+        if (!row?.wp) {
+          console.warn(
+            "[linear dispatch] no session row for",
+            issue.identifier,
+            "— executeTask may have failed",
+          );
+        }
         const stamp = buildEnvStamp(hostname(), row?.wp ?? "?", "new");
         const commentId = await client.createComment(
           issue.id,
@@ -73,9 +80,9 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
       finalize: async () => {
         const rows = db
           .prepare(
-            "SELECT t.linear_issue_id as iid, t.linear_workpad_comment_id as cid, s.status as st, s.branch_name as branch, s.worktree_path as wp, s.local_cli_agent_id as engine FROM tasks t JOIN sessions s ON s.id = t.session_id WHERE t.linear_issue_id IS NOT NULL AND s.status IN ('completed','failed','killed') AND t.status = 'in_progress'",
+            "SELECT t.linear_issue_id as iid, t.linear_workpad_comment_id as cid, s.status as st, s.branch_name as branch, s.worktree_path as wp, s.local_cli_agent_id as engine FROM tasks t JOIN sessions s ON s.id = t.session_id WHERE t.linear_issue_id IS NOT NULL AND t.linear_workpad_comment_id IS NOT NULL AND s.status IN ('completed','failed','killed') AND t.status = 'in_progress' AND t.project_id = ?",
           )
-          .all() as Array<{
+          .all(w.devlogProjectId) as Array<{
           iid: string;
           cid: string;
           st: "completed" | "failed" | "killed";
@@ -84,34 +91,38 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
           engine: string;
         }>;
         for (const r of rows) {
-          await finalizeOutcome(
-            r.st,
-            {
-              client,
-              reviewStateId: stateIds.review,
-              commentId: r.cid,
-              issueId: r.iid,
-              branch: r.branch,
-              engine: (r.engine as EngineId) ?? "claude",
-              stamp: buildEnvStamp(hostname(), r.wp, "done"),
-              detectPr: async () => {
-                try {
-                  const { stdout } = await execAsync(
-                    `gh pr list --head ${r.branch} --json url --jq '.[0].url'`,
-                    { cwd: r.wp },
-                  );
-                  return stdout.trim();
-                } catch {
-                  return "";
-                }
+          try {
+            await finalizeOutcome(
+              r.st,
+              {
+                client,
+                reviewStateId: stateIds.review,
+                commentId: r.cid,
+                issueId: r.iid,
+                branch: r.branch,
+                engine: (r.engine as EngineId) ?? "claude",
+                stamp: buildEnvStamp(hostname(), r.wp, "done"),
+                detectPr: async () => {
+                  try {
+                    const { stdout } = await execAsync(
+                      `gh pr list --head '${r.branch}' --json url --jq '.[0].url'`,
+                      { cwd: r.wp },
+                    );
+                    return stdout.trim();
+                  } catch {
+                    return "";
+                  }
+                },
+                readWorkpad: async () => readFile(`${r.wp}/.devlog/workpad.md`, "utf-8"),
               },
-              readWorkpad: async () => readFile(`${r.wp}/.devlog/workpad.md`, "utf-8"),
-            },
-            w,
-          );
-          db.prepare(
-            "UPDATE tasks SET status = CASE WHEN ? = 'completed' THEN 'review' ELSE 'blocked' END, updated_at = datetime('now') WHERE linear_issue_id = ?",
-          ).run(r.st, r.iid);
+              w,
+            );
+            db.prepare(
+              "UPDATE tasks SET status = CASE WHEN ? = 'completed' THEN 'review' ELSE 'blocked' END, updated_at = datetime('now') WHERE linear_issue_id = ?",
+            ).run(r.st, r.iid);
+          } catch (e) {
+            console.error("[linear finalize] row failed", r.iid, e);
+          }
         }
       },
     };
