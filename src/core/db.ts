@@ -214,6 +214,7 @@ export function getDb(): Database.Database {
   // (tasks_new, sessions_new) — so the linear columns are never dropped by a later
   // CREATE TABLE … tasks_new / DROP TABLE tasks sequence.
   migrateLinearColumns(_db);
+  migrateBreakdownTable(_db);
 
   return _db;
 }
@@ -224,6 +225,18 @@ export function migrateLinearColumns(db: Database.Database): void {
   if (!cols.includes("linear_identifier")) db.exec("ALTER TABLE tasks ADD COLUMN linear_identifier TEXT");
   if (!cols.includes("linear_workpad_comment_id")) db.exec("ALTER TABLE tasks ADD COLUMN linear_workpad_comment_id TEXT");
   if (!cols.includes("linear_finalized_at")) db.exec("ALTER TABLE tasks ADD COLUMN linear_finalized_at TEXT");
+  if (!cols.includes("linear_breakdown_done_at")) db.exec("ALTER TABLE tasks ADD COLUMN linear_breakdown_done_at TEXT");
+}
+
+export function migrateBreakdownTable(db: Database.Database): void {
+  db.exec(`CREATE TABLE IF NOT EXISTS linear_breakdown_subs (
+    parent_issue_id TEXT NOT NULL,
+    child_issue_id TEXT NOT NULL,
+    child_identifier TEXT,
+    position INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(parent_issue_id, position)
+  )`);
 }
 
 export function migrateTasksV2(db: Database.Database): void {

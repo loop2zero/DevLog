@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   linear_identifier TEXT,
   linear_workpad_comment_id TEXT,
   linear_finalized_at TEXT,
+  linear_breakdown_done_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   completed_at TEXT
@@ -107,6 +108,15 @@ CREATE INDEX IF NOT EXISTS idx_session_messages_session ON session_messages(sess
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_file_locks_project ON file_locks(project_id, file_path);
+
+CREATE TABLE IF NOT EXISTS linear_breakdown_subs (
+  parent_issue_id TEXT NOT NULL,
+  child_issue_id TEXT NOT NULL,
+  child_identifier TEXT,
+  position INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(parent_issue_id, position)
+);
 
 CREATE VIEW IF NOT EXISTS active_conflicts AS
 SELECT
