@@ -7,11 +7,22 @@ test("buildEnvStamp formats host:path@sha", () => {
   assert.equal(buildEnvStamp("host", "/p", "abc1234"), "host:/p@abc1234");
 });
 
-test("resolveStateIds maps In Progress + reviewState names to ids (case-insensitive)", async () => {
+test("resolveStateIds maps trigger/inProgress/review/done/parked by name and type", async () => {
+  const client = { fetchWorkflowStates: async () => [
+    { id: "todo", name: "Todo", type: "unstarted" },
+    { id: "prog", name: "In Progress", type: "started" },
+    { id: "rev", name: "In Review", type: "started" },
+    { id: "back", name: "Backlog", type: "backlog" },
+    { id: "done", name: "Done", type: "completed" },
+  ] };
   const w = normalizeWatchConfig({ projectSlugId: "p", devlogProjectId: "r" });
-  const client = { async fetchWorkflowStates() { return [{ id: "ip", name: "In Progress" }, { id: "rv", name: "In Review" }, { id: "td", name: "Todo" }]; } };
   const ids = await resolveStateIds(client as any, w);
-  assert.deepEqual(ids, { inProgress: "ip", review: "rv" });
+  assert.equal(ids.trigger, "todo");
+  assert.equal(ids.inProgress, "prog");
+  assert.equal(ids.review, "rev");
+  assert.equal(ids.done, "done");
+  assert.equal(ids.parked, "back");
+  assert.equal(ids.parkedName, "Backlog");
 });
 
 test("resolveStateIds throws when a required state is missing", async () => {

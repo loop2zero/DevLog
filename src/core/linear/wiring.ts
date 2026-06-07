@@ -21,14 +21,28 @@ export function buildEnvStamp(host: string, path: string, sha: string): string {
 export async function resolveStateIds(
   client: Pick<LinearClientI, "fetchWorkflowStates">,
   w: LinearWatchConfig,
-): Promise<{ inProgress: string; review: string }> {
+): Promise<{ trigger: string; inProgress: string; review: string; done: string; parked: string; parkedName: string }> {
   const states = await client.fetchWorkflowStates(w.projectSlugId);
   const byName = (name: string) => {
     const s = states.find((x) => x.name.toLowerCase() === name.toLowerCase());
     if (!s) throw new Error(`Linear state "${name}" not found in project ${w.projectSlugId}`);
     return s.id;
   };
-  return { inProgress: byName("In Progress"), review: byName(w.reviewState) };
+  const byType = (type: string, label: string) => {
+    const s = states.find((x) => x.type === type);
+    if (!s) throw new Error(`Linear state of type "${type}" (${label}) not found in project ${w.projectSlugId}`);
+    return s;
+  };
+  const parked = byType("backlog", "parked");
+  const done = byType("completed", "done");
+  return {
+    trigger: byName(w.triggerState),
+    inProgress: byName("In Progress"),
+    review: byName(w.reviewState),
+    done: done.id,
+    parked: parked.id,
+    parkedName: parked.name,
+  };
 }
 
 export async function startWatching(): Promise<Array<{ stop: () => void }>> {
