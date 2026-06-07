@@ -18,7 +18,7 @@
     "build:cli": "tsup",
     "build:web": "next build",
     "start": "next start",
-    "test": "node --test --import tsx --test-reporter spec 'src/core/__tests__/*.test.ts' 'src/components/sessions/*.test.ts'",
+    "test": "node --test --import tsx --test-reporter spec src/core/__tests__/*.test.ts src/components/sessions/*.test.ts",
     "test:e2e:task-launch": "node scripts/task-launch-e2e.mjs",
     "typecheck": "tsc --noEmit",
     "quality:precommit": "git diff --cached --check && bun run typecheck && TZ=Asia/Shanghai bun run test",
