@@ -1,38 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { randomBytes } from "crypto";
-import { getDb } from "@/core/db";
 import { resolveProjectId } from "@/lib/api-utils";
-import { getProject } from "@/core/project-adapter";
-import { createWorktree, listWorktrees } from "@/core/worktree-manager";
-import {
-  processManager,
-  validateSessionRuntimeProcessLaunch,
-} from "@/core/process-manager";
-import { fileWatcher } from "@/core/file-watcher";
-import { hasTaskPrompt } from "@/core/task-readiness";
-import {
-  markSessionFailedAndReleaseLinkedTask,
-  slugify,
-  buildPromptTemplate,
-} from "@/core/task-lifecycle";
-import { isTaskExecutableStatus } from "@/core/task-status-flow";
-import {
-  getAgentExecutionInputFromPayload,
-  resolveAgentExecutionConfig,
-} from "@/core/agent-presets";
-import {
-  getSessionRuntimeAuthInputFromPayload,
-  getPersistedSessionBaseUrl,
-  resolveSessionRuntimeAuthConfig,
-} from "@/core/session-runtime-auth";
-import type { Task, Session } from "@/core/types-dashboard";
+import { executeTask } from "@/core/task-execution";
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: taskId } = await params;
-  const db = getDb();
   const projectId = resolveProjectId(req);
   let payload: unknown;
   try {
@@ -40,144 +14,13 @@ export async function POST(
   } catch {
     // No body means use the default agent execution config.
   }
-  const agentConfig = resolveAgentExecutionConfig(
-    getAgentExecutionInputFromPayload(payload),
+
+  const result = await executeTask(taskId, projectId, payload);
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
+  }
+  return NextResponse.json(
+    { session: result.session, worktree: result.worktree },
+    { status: 201 },
   );
-  const runtimeAuthInput = getSessionRuntimeAuthInputFromPayload(payload);
-  const runtimeAuthConfig = resolveSessionRuntimeAuthConfig(runtimeAuthInput);
-
-  // 1. Fetch and validate task
-  const task = db
-    .prepare("SELECT * FROM tasks WHERE id = ? AND project_id = ?")
-    .get(taskId, projectId) as Task | undefined;
-
-  if (!task) {
-    return NextResponse.json({ error: "Task not found" }, { status: 404 });
-  }
-  if (!hasTaskPrompt(task.prompt)) {
-    return NextResponse.json(
-      { error: "Task has no prompt. Add a prompt before executing." },
-      { status: 400 }
-    );
-  }
-  if (!isTaskExecutableStatus(task.status)) {
-    return NextResponse.json(
-      { error: `Cannot execute task with status '${task.status}'` },
-      { status: 400 }
-    );
-  }
-
-  // 2. Create worktree
-  const project = getProject(projectId);
-  const preflight = validateSessionRuntimeProcessLaunch(
-    runtimeAuthConfig,
-    project.path,
-  );
-  if (!preflight.ok) {
-    return NextResponse.json({ error: preflight.error }, { status: 400 });
-  }
-  const slug = slugify(task.title);
-  const worktreeName = `task-${slug}`;
-  const branchName = `task/${taskId.slice(0, 8)}-${slug}`;
-
-  let worktree;
-  try {
-    worktree = await createWorktree(
-      worktreeName,
-      branchName,
-      project.defaultBranch,
-      projectId
-    );
-  } catch (err) {
-    // Worktree/branch might already exist (retry scenario)
-    const msg = (err as Error).message;
-    if (msg.includes("already exists")) {
-      const wts = await listWorktrees(projectId);
-      worktree = wts.find((w) => w.name === worktreeName);
-      if (!worktree) {
-        return NextResponse.json(
-          { error: `Worktree conflict: ${msg}` },
-          { status: 409 }
-        );
-      }
-    } else {
-      return NextResponse.json(
-        { error: `Failed to create worktree: ${msg}` },
-        { status: 500 }
-      );
-    }
-  }
-
-  // 3. Create session
-  const sessionId = randomBytes(8).toString("hex");
-  const prompt = buildPromptTemplate(
-    task,
-    project,
-    worktree.path,
-    branchName,
-    agentConfig,
-    runtimeAuthConfig,
-  );
-
-  const session = db
-    .prepare(
-      `INSERT INTO sessions (
-        id, project_id, task_id, worktree_name, worktree_path, branch_name,
-        status, coding_agent_id, agent_team_id, session_auth_mode,
-        agent_api_key_env_var, local_cli_agent_id, agent_model,
-        agent_reasoning, agent_api_protocol, agent_api_version,
-        agent_base_url, agent_max_tokens, prompt
-      )
-       VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`
-    )
-    .get(
-      sessionId,
-      projectId,
-      taskId,
-      worktreeName,
-      worktree.path,
-      branchName,
-      agentConfig.codingAgent.id,
-      agentConfig.agentTeam.id,
-      runtimeAuthConfig.mode,
-      runtimeAuthConfig.agentApiKeyEnvVar,
-      runtimeAuthConfig.localCliAgentId,
-      runtimeAuthConfig.model,
-      runtimeAuthConfig.reasoning,
-      runtimeAuthConfig.apiProtocol,
-      runtimeAuthConfig.apiVersion,
-      getPersistedSessionBaseUrl(runtimeAuthConfig),
-      runtimeAuthConfig.maxTokens,
-      prompt
-    ) as Session;
-
-  // 4. Update task
-  db.prepare(
-    "UPDATE tasks SET status = 'in_progress', worktree_name = ?, session_id = ?, fail_reason = NULL, completed_at = NULL, updated_at = datetime('now') WHERE id = ?"
-  ).run(worktreeName, sessionId, taskId);
-
-  // 5. Start file watcher
-  try {
-    fileWatcher.watchWorktree(worktreeName, worktree.path, sessionId);
-  } catch {
-    // non-fatal
-  }
-
-  // 6. Spawn agent (non-blocking)
-  try {
-    processManager.sendMessage(sessionId, prompt, runtimeAuthInput);
-  } catch (err) {
-    markSessionFailedAndReleaseLinkedTask(
-      db,
-      sessionId,
-      `Failed to start agent: ${(err as Error).message}`,
-    );
-    return NextResponse.json(
-      { error: `Failed to start agent: ${(err as Error).message}` },
-      { status: 500 }
-    );
-  }
-
-  return NextResponse.json({ session, worktree }, { status: 201 });
 }

@@ -39,7 +39,8 @@ test("Husky pre-commit hook runs the shared pre-commit gate", () => {
 test("session insert route SQL has one value expression per column", () => {
   const routes = [
     "src/app/api/sessions/route.ts",
-    "src/app/api/tasks/[id]/execute/route.ts",
+    // execute logic moved to src/core/task-execution.ts (shared with Linear dispatcher)
+    "src/core/task-execution.ts",
     "src/app/api/tasks/[id]/retry/route.ts",
   ];
 
