@@ -5,7 +5,7 @@ type FetchFn = typeof fetch;
 export interface LinearClientI {
   fetchTriggerIssues(slugId: string, state: string): Promise<LinearIssue[]>;
   fetchStateNameByIssue(issueId: string): Promise<string | null>;
-  fetchWorkflowStates(projectSlugId: string): Promise<Array<{ id: string; name: string }>>;
+  fetchWorkflowStates(projectSlugId: string): Promise<Array<{ id: string; name: string; type: string }>>;
   updateState(issueId: string, stateId: string): Promise<void>;
   createComment(issueId: string, body: string): Promise<string>;
   updateComment(commentId: string, body: string): Promise<void>;
@@ -13,7 +13,7 @@ export interface LinearClientI {
 
 const Q_TRIGGER = `query($slug:String!,$state:String!){ issues(filter:{project:{slugId:{eq:$slug}}, state:{name:{eq:$state}}}, first:25){ nodes{ id identifier title description state{name} labels{ nodes{ name } } } } }`;
 const Q_STATE = `query($id:String!){ issue(id:$id){ state{ name } } }`;
-const Q_WORKFLOW_STATES = `query($slug:String!){ projects(filter:{slugId:{eq:$slug}}, first:1){ nodes{ teams{ nodes{ states{ nodes{ id name } } } } } } }`;
+const Q_WORKFLOW_STATES = `query($slug:String!){ projects(filter:{slugId:{eq:$slug}}, first:1){ nodes{ teams{ nodes{ states{ nodes{ id name type } } } } } } }`;
 const M_STATE = `mutation($id:String!,$stateId:String!){ issueUpdate(id:$id, input:{stateId:$stateId}){ success } }`;
 const M_COMMENT = `mutation($issueId:String!,$body:String!){ commentCreate(input:{issueId:$issueId, body:$body}){ success comment{ id } } }`;
 const M_COMMENT_UPD = `mutation($id:String!,$body:String!){ commentUpdate(id:$id, input:{body:$body}){ success } }`;
@@ -45,19 +45,16 @@ export class LinearClient implements LinearClientI {
     return d.issue?.state.name ?? null;
   }
 
-  async fetchWorkflowStates(projectSlugId: string): Promise<Array<{ id: string; name: string }>> {
+  async fetchWorkflowStates(projectSlugId: string): Promise<Array<{ id: string; name: string; type: string }>> {
     const d = await this.gql<{
-      projects: { nodes: Array<{ teams: { nodes: Array<{ states: { nodes: Array<{ id: string; name: string }> } }> } }> };
+      projects: { nodes: Array<{ teams: { nodes: Array<{ states: { nodes: Array<{ id: string; name: string; type: string }> } }> } }> };
     }>(Q_WORKFLOW_STATES, { slug: projectSlugId });
     const seen = new Set<string>();
-    const result: Array<{ id: string; name: string }> = [];
+    const result: Array<{ id: string; name: string; type: string }> = [];
     for (const project of d.projects.nodes) {
       for (const team of project.teams.nodes) {
         for (const state of team.states.nodes) {
-          if (!seen.has(state.id)) {
-            seen.add(state.id);
-            result.push({ id: state.id, name: state.name });
-          }
+          if (!seen.has(state.id)) { seen.add(state.id); result.push({ id: state.id, name: state.name, type: state.type }); }
         }
       }
     }

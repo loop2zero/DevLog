@@ -41,27 +41,19 @@ test("gql throws when GraphQL returns errors", async () => {
   await assert.rejects(() => c.fetchTriggerIssues("s", "Todo"));
 });
 
-test("fetchWorkflowStates flattens teams→states and dedupes by id", async () => {
+test("fetchWorkflowStates flattens teams→states, dedupes by id, includes type", async () => {
   const fakeData = {
-    projects: {
-      nodes: [
-        {
-          teams: {
-            nodes: [
-              { states: { nodes: [{ id: "s1", name: "Todo" }, { id: "s2", name: "In Progress" }] } },
-              { states: { nodes: [{ id: "s2", name: "In Progress" }, { id: "s3", name: "Done" }] } },
-            ],
-          },
-        },
-      ],
-    },
+    projects: { nodes: [ { teams: { nodes: [
+      { states: { nodes: [{ id: "s1", name: "Todo", type: "unstarted" }, { id: "s2", name: "In Progress", type: "started" }] } },
+      { states: { nodes: [{ id: "s2", name: "In Progress", type: "started" }, { id: "s3", name: "Done", type: "completed" }] } },
+    ] } } ] },
   };
   const fakeFetch = async () => ({ json: async () => ({ data: fakeData }) });
   const c = new LinearClient("KEY", fakeFetch as any);
   const states = await c.fetchWorkflowStates("slug123");
   assert.deepEqual(states, [
-    { id: "s1", name: "Todo" },
-    { id: "s2", name: "In Progress" },
-    { id: "s3", name: "Done" },
+    { id: "s1", name: "Todo", type: "unstarted" },
+    { id: "s2", name: "In Progress", type: "started" },
+    { id: "s3", name: "Done", type: "completed" },
   ]);
 });
