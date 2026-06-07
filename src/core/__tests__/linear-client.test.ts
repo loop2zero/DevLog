@@ -85,3 +85,28 @@ test("updateIssueBody sends issueUpdate with description", async () => {
   assert.ok(captured[0].query.includes("issueUpdate"));
   assert.deepEqual(captured[0].variables, { id: "i1", desc: "new body" });
 });
+
+test("fetchChildIssues returns children with id/title/stateName", async () => {
+  const fakeData = { issue: { children: { nodes: [
+    { id: "c1", identifier: "ARC-2", title: "Slice", state: { name: "Done" } },
+    { id: "c2", identifier: "ARC-3", title: "API", state: { name: "Backlog" } },
+  ] } } };
+  const fakeFetch = async () => ({ json: async () => ({ data: fakeData }) });
+  const c = new LinearClient("KEY", fakeFetch as any);
+  const kids = await c.fetchChildIssues("p1");
+  assert.deepEqual(kids, [
+    { id: "c1", identifier: "ARC-2", title: "Slice", stateName: "Done" },
+    { id: "c2", identifier: "ARC-3", title: "API", stateName: "Backlog" },
+  ]);
+});
+
+test("fetchTeamAndLabels returns first team id and lowercased label map", async () => {
+  const fakeData = { projects: { nodes: [ { teams: { nodes: [
+    { id: "team1", labels: { nodes: [{ id: "l1", name: "claude" }, { id: "l2", name: "Codex" }] } },
+  ] } } ] } };
+  const fakeFetch = async () => ({ json: async () => ({ data: fakeData }) });
+  const c = new LinearClient("KEY", fakeFetch as any);
+  const out = await c.fetchTeamAndLabels("slug123");
+  assert.equal(out.teamId, "team1");
+  assert.deepEqual(out.labels, { claude: "l1", codex: "l2" });
+});
