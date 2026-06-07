@@ -28,6 +28,7 @@ export interface Task {
   linear_issue_id?: string | null;
   linear_identifier?: string | null;
   linear_workpad_comment_id?: string | null;
+  linear_finalized_at?: string | null;
 }
 
 export type SessionStatus =

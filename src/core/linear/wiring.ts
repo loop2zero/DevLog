@@ -110,7 +110,7 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
         // FIX 1: include 'idle' — process-manager marks local-CLI sessions 'idle' on exit.
         const rows = db
           .prepare(
-            "SELECT t.linear_issue_id as iid, t.linear_workpad_comment_id as cid, s.status as st, s.branch_name as branch, s.worktree_path as wp, s.local_cli_agent_id as engine FROM tasks t JOIN sessions s ON s.id = t.session_id WHERE t.linear_issue_id IS NOT NULL AND t.linear_workpad_comment_id IS NOT NULL AND s.status IN ('idle','completed','failed','killed') AND t.status = 'in_progress' AND t.project_id = ?",
+            "SELECT t.linear_issue_id as iid, t.linear_workpad_comment_id as cid, s.status as st, s.branch_name as branch, s.worktree_path as wp, s.local_cli_agent_id as engine FROM tasks t JOIN sessions s ON s.id = t.session_id WHERE t.linear_issue_id IS NOT NULL AND t.linear_workpad_comment_id IS NOT NULL AND s.status IN ('idle','completed','failed','killed') AND t.linear_finalized_at IS NULL AND t.project_id = ?",
           )
           .all(w.devlogProjectId) as Array<{
           iid: string;
@@ -155,12 +155,20 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
               w,
             );
 
-            // FIX 2: derive task status from the semantic return value, not raw session status.
-            const taskStatus =
-              result === "review" ? "review" : result === "blocked" ? "blocked" : "done";
-            db.prepare(
-              "UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE linear_issue_id = ?",
-            ).run(taskStatus, r.iid);
+            // Stamp finalized so this row is never processed again (even if DevLog's own
+            // onSessionExit already moved task.status away from 'in_progress').
+            // "skipped" means a human already closed the Linear issue — leave DevLog status
+            // as-is, but still mark finalized so we stop polling it.
+            if (result === "skipped") {
+              db.prepare(
+                "UPDATE tasks SET linear_finalized_at = datetime('now'), updated_at = datetime('now') WHERE linear_issue_id = ?",
+              ).run(r.iid);
+            } else {
+              const boardStatus = result === "review" ? "review" : result === "blocked" ? "blocked" : "done";
+              db.prepare(
+                "UPDATE tasks SET status = ?, linear_finalized_at = datetime('now'), updated_at = datetime('now') WHERE linear_issue_id = ?",
+              ).run(boardStatus, r.iid);
+            }
           } catch (e) {
             console.error("[linear finalize] row failed", r.iid, e);
           }

@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   linear_issue_id TEXT,
   linear_identifier TEXT,
   linear_workpad_comment_id TEXT,
+  linear_finalized_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   completed_at TEXT

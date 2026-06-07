@@ -12,6 +12,7 @@ test("migrateLinearColumns adds linear linkage columns to a bare tasks table", (
   assert.ok(cols.includes("linear_issue_id"));
   assert.ok(cols.includes("linear_identifier"));
   assert.ok(cols.includes("linear_workpad_comment_id"));
+  assert.ok(cols.includes("linear_finalized_at"));
 });
 
 test("migrateLinearColumns is idempotent", () => {
@@ -27,4 +28,5 @@ test("fresh SCHEMA db (makeTestDb) already has the linear columns", () => {
   assert.ok(cols.includes("linear_issue_id"));
   assert.ok(cols.includes("linear_identifier"));
   assert.ok(cols.includes("linear_workpad_comment_id"));
+  assert.ok(cols.includes("linear_finalized_at"));
 });

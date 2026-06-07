@@ -33,30 +33,30 @@ export async function finalizeOutcome(
 
   const agentBody = await safe(ctx.readWorkpad);
 
-  if (outcome === "idle" || outcome === "completed") {
-    const pr = await safe(ctx.detectPr);
-    if (pr) {
-      await ctx.client.updateComment(
-        ctx.commentId,
-        assembleWorkpad({
-          engine: ctx.engine,
-          branch: ctx.branch,
-          state: "In Review",
-          stamp: ctx.stamp,
-          pr,
-          cost: ctx.cost,
-          agentBody,
-        }),
-      );
-      await ctx.client.updateState(ctx.issueId, ctx.reviewStateId);
-      return "review";
-    }
+  // PR is the source of truth regardless of session outcome: a session that ended
+  // 'failed' or 'killed' may still have opened a PR (ARC-94 scenario).
+  const pr = await safe(ctx.detectPr);
+  if (pr) {
+    await ctx.client.updateComment(
+      ctx.commentId,
+      assembleWorkpad({
+        engine: ctx.engine,
+        branch: ctx.branch,
+        state: "In Review",
+        stamp: ctx.stamp,
+        pr,
+        cost: ctx.cost,
+        agentBody,
+      }),
+    );
+    await ctx.client.updateState(ctx.issueId, ctx.reviewStateId);
+    return "review";
   }
 
   const reason =
     outcome === "idle" || outcome === "completed"
       ? "session ended but no PR was opened"
-      : `agent ${outcome}`;
+      : `agent ${outcome}, no PR opened`;
   await ctx.client.updateComment(
     ctx.commentId,
     assembleWorkpad({

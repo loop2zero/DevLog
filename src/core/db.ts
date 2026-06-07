@@ -223,6 +223,7 @@ export function migrateLinearColumns(db: Database.Database): void {
   if (!cols.includes("linear_issue_id")) db.exec("ALTER TABLE tasks ADD COLUMN linear_issue_id TEXT");
   if (!cols.includes("linear_identifier")) db.exec("ALTER TABLE tasks ADD COLUMN linear_identifier TEXT");
   if (!cols.includes("linear_workpad_comment_id")) db.exec("ALTER TABLE tasks ADD COLUMN linear_workpad_comment_id TEXT");
+  if (!cols.includes("linear_finalized_at")) db.exec("ALTER TABLE tasks ADD COLUMN linear_finalized_at TEXT");
 }
 
 export function migrateTasksV2(db: Database.Database): void {

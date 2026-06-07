@@ -36,16 +36,34 @@ test("idle + PR -> returns 'review' (idle treated same as completed)", async () 
   assert.equal(result, "review");
 });
 
-test("failed -> returns 'blocked'", async () => {
+test("failed + no PR -> returns 'blocked'", async () => {
   const c = ctx({ detectPr: async () => "" });
   const result = await finalizeOutcome("failed", c as any, w);
   assert.equal(result, "blocked");
 });
 
-test("killed -> returns 'blocked'", async () => {
+test("killed + no PR -> returns 'blocked'", async () => {
   const c = ctx({ detectPr: async () => "" });
   const result = await finalizeOutcome("killed", c as any, w);
   assert.equal(result, "blocked");
+});
+
+// ARC-94: session ended 'failed' but the agent still opened a PR — PR wins.
+test("outcome=failed BUT a PR exists -> returns 'review' and moves state", async () => {
+  const c = ctx({ detectPr: async () => "https://github.com/org/repo/pull/42" });
+  const result = await finalizeOutcome("failed", c as any, w);
+  assert.equal(result, "review");
+  assert.ok(c.client.calls.some((x: any) => x[0] === "state" && x[1] === "i1" && x[2] === "REVIEW"));
+  const comment = c.client.calls.find((x: any) => x[0] === "comment");
+  assert.ok(comment[2].includes("In Review"));
+  assert.ok(comment[2].includes("https://github.com/org/repo/pull/42"));
+});
+
+test("outcome=killed BUT a PR exists -> returns 'review' and moves state", async () => {
+  const c = ctx({ detectPr: async () => "https://github.com/org/repo/pull/43" });
+  const result = await finalizeOutcome("killed", c as any, w);
+  assert.equal(result, "review");
+  assert.ok(c.client.calls.some((x: any) => x[0] === "state" && x[2] === "REVIEW"));
 });
 
 test("completed but no PR -> returns 'blocked'", async () => {
