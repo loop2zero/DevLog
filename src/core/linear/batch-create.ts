@@ -30,6 +30,15 @@ export type RunBreakdownResult = { ok: true; created: number } | { ok: false; er
 export async function runBreakdown(deps: RunBreakdownDeps): Promise<RunBreakdownResult> {
   const { db, client, parent, repoRoot, stateIds, teamAndLabels } = deps;
 
+  // Self-idempotent: if this parent was already fully batch-created (stamp present),
+  // do nothing. Combined with stamping LAST, a mid-run crash leaves NO stamp, so the
+  // next call re-enters and skip-by-title recovers; a completed run is a no-op here.
+  // This makes runBreakdown safe regardless of the caller's own guarding.
+  const alreadyDone = db
+    .prepare("SELECT 1 FROM tasks WHERE linear_issue_id = ? AND linear_breakdown_done_at IS NOT NULL")
+    .get(parent.id);
+  if (alreadyDone) return { ok: true, created: 0 };
+
   let raw: string;
   try {
     raw = await readFile(join(repoRoot, ".devlog", "breakdown.json"), "utf-8");
@@ -50,7 +59,7 @@ export async function runBreakdown(deps: RunBreakdownDeps): Promise<RunBreakdown
     const key = sub.title.trim().toLowerCase();
     const reuse = byTitle.get(key);
     let childId: string;
-    let childIdentifier: string | null = null;
+    let childIdentifier: string;
     if (reuse) {
       childId = reuse.id;
       childIdentifier = reuse.identifier;

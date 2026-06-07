@@ -86,3 +86,18 @@ test("runBreakdown returns error on malformed breakdown.json and stamps nothing"
   const prow = db.prepare("SELECT 1 FROM tasks WHERE linear_issue_id='p1'").get();
   assert.equal(prow, undefined);
 });
+
+test("runBreakdown is self-idempotent: a second call is a no-op", async () => {
+  const db = makeTestDb();
+  const repo = tmpRepoWith({ parentSummary: "r", subIssues: [{ title: "A", description: "", labels: ["claude"] }] });
+  const w = normalizeWatchConfig({ projectSlugId: "p", devlogProjectId: "repo1" });
+  const first = fakeClient();
+  await runBreakdown({ db, client: first.client as any, w, parent, repoRoot: repo, stateIds, teamAndLabels });
+
+  const second = fakeClient();
+  const res2 = await runBreakdown({ db, client: second.client as any, w, parent, repoRoot: repo, stateIds, teamAndLabels });
+  assert.equal(res2.ok, true);
+  assert.equal(second.calls.created.length, 0); // no new issues created
+  const count: any = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE linear_issue_id='p1'").get();
+  assert.equal(count.n, 1); // exactly one parent row, no duplicate
+});
