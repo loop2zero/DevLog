@@ -12,6 +12,7 @@ import { statuslineCommand } from "./commands/statusline";
 import { setupStatuslineCommand } from "./commands/setup-statusline";
 import { setupTmuxCommand } from "./commands/setup-tmux";
 import { serveCommand } from "./commands/serve";
+import { watchCommand } from "./commands/watch";
 import { initOutput, outputJson } from "./utils/output";
 import { levenshtein } from "./utils/format";
 import type { GlobalOptions } from "../core/types";
@@ -56,6 +57,7 @@ const program = new Command();
 
 const KNOWN_COMMANDS = [
   "serve",
+  "watch",
   "init",
   "sessions",
   "show",
@@ -123,6 +125,19 @@ program
     const globalOpts = getGlobalOpts();
     try {
       await serveCommand(options, globalOpts);
+    } catch (err) {
+      handleError(err, globalOpts);
+    }
+  });
+
+// ── devlog watch ─────────────────────────────────────────
+program
+  .command("watch")
+  .description("Drive DevLog from Linear (poll trigger issues, run agents, write back)")
+  .action(async () => {
+    const globalOpts = getGlobalOpts();
+    try {
+      await watchCommand();
     } catch (err) {
       handleError(err, globalOpts);
     }

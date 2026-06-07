@@ -40,3 +40,28 @@ test("gql throws when GraphQL returns errors", async () => {
   const c = new LinearClient("KEY", fakeFetch as any);
   await assert.rejects(() => c.fetchTriggerIssues("s", "Todo"));
 });
+
+test("fetchWorkflowStates flattens teams→states and dedupes by id", async () => {
+  const fakeData = {
+    projects: {
+      nodes: [
+        {
+          teams: {
+            nodes: [
+              { states: { nodes: [{ id: "s1", name: "Todo" }, { id: "s2", name: "In Progress" }] } },
+              { states: { nodes: [{ id: "s2", name: "In Progress" }, { id: "s3", name: "Done" }] } },
+            ],
+          },
+        },
+      ],
+    },
+  };
+  const fakeFetch = async () => ({ json: async () => ({ data: fakeData }) });
+  const c = new LinearClient("KEY", fakeFetch as any);
+  const states = await c.fetchWorkflowStates("slug123");
+  assert.deepEqual(states, [
+    { id: "s1", name: "Todo" },
+    { id: "s2", name: "In Progress" },
+    { id: "s3", name: "Done" },
+  ]);
+});
