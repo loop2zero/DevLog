@@ -371,6 +371,10 @@ export function resolveStoredSessionRuntimeAuthConfig(
     ...persistedInput,
     anthropic_api_key: transientInput.anthropic_api_key,
     local_cli_agent_env: transientInput.local_cli_agent_env,
+    // `unattended` is transient (never persisted on the session row), so it must
+    // be carried from the live input at spawn time — otherwise autonomous Claude
+    // sessions fall back to interactive permission prompts and hang.
+    unattended: transientInput.unattended,
   });
 }
 
