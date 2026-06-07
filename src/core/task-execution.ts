@@ -51,14 +51,10 @@ export type ExecuteResult = ExecuteSuccess | ExecuteError;
 // run with the given local_cli_agent_id.
 // ---------------------------------------------------------------------------
 
-export function buildEngineExecuteInput(engine: "claude" | "codex"): {
-  agentInput: Record<string, never>;
-  runtimeAuthInput: SessionRuntimeAuthInput;
-} {
-  return {
-    agentInput: {},
-    runtimeAuthInput: { local_cli_agent_id: engine },
-  };
+export function buildEngineExecuteInput(
+  engine: "claude" | "codex",
+): SessionRuntimeAuthInput {
+  return { local_cli_agent_id: engine };
 }
 
 // ---------------------------------------------------------------------------
