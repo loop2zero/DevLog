@@ -43,3 +43,13 @@ test("normalizeWatchConfig labelEngineMap normalization: resolveEngine matches l
   assert.equal(resolveEngine(["CODEX"], w), "codex");
   assert.equal(resolveEngine(["Codex"], w), "codex");
 });
+
+test("normalizeWatchConfig defaults breakdownLabel to design-breakdown (lowercased)", () => {
+  const w = normalizeWatchConfig({ projectSlugId: "p", devlogProjectId: "r" });
+  assert.equal(w.breakdownLabel, "design-breakdown");
+});
+
+test("normalizeWatchConfig lowercases an explicit breakdownLabel", () => {
+  const w = normalizeWatchConfig({ projectSlugId: "p", devlogProjectId: "r", breakdownLabel: "Design-Breakdown" });
+  assert.equal(w.breakdownLabel, "design-breakdown");
+});

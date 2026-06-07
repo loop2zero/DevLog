@@ -8,6 +8,7 @@ export interface LinearWatchConfig {
   terminalStates: string[];
   defaultEngine: EngineId;
   labelEngineMap: Record<string, EngineId>;
+  breakdownLabel: string;
 }
 
 export interface LinearConfig {
@@ -39,5 +40,6 @@ export function normalizeWatchConfig(
         ([k, v]) => [k.trim().toLowerCase(), v],
       ),
     ) as Record<string, EngineId>,
+    breakdownLabel: (raw.breakdownLabel ?? "design-breakdown").trim().toLowerCase(),
   };
 }
