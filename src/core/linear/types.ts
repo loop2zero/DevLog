@@ -34,6 +34,10 @@ export function normalizeWatchConfig(
     reviewState: raw.reviewState ?? "In Review",
     terminalStates: raw.terminalStates ?? ["Done", "Canceled", "Cancelled", "Duplicate"],
     defaultEngine: raw.defaultEngine ?? "claude",
-    labelEngineMap: raw.labelEngineMap ?? { claude: "claude", codex: "codex" },
+    labelEngineMap: Object.fromEntries(
+      Object.entries(raw.labelEngineMap ?? { claude: "claude", codex: "codex" }).map(
+        ([k, v]) => [k.trim().toLowerCase(), v],
+      ),
+    ) as Record<string, EngineId>,
   };
 }

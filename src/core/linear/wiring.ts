@@ -1,4 +1,4 @@
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
 import { readFile } from "fs/promises";
 import { hostname } from "os";
@@ -12,7 +12,7 @@ import { executeTask } from "../task-execution";
 import { startPoller, type TickDeps } from "./poller";
 import type { EngineId, LinearWatchConfig } from "./types";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export function buildEnvStamp(host: string, path: string, sha: string): string {
   return `${host}:${path}@${sha}`;
@@ -38,6 +38,13 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
   if (!cfg) throw new Error("No `linear` config in devlog.config.json");
   const db = getDb();
   const client = new LinearClient(key);
+
+  // Scrub all LINEAR_* vars so spawned agent processes cannot see the token.
+  // The LinearClient already holds `key` in its closure — harness calls still work.
+  for (const k of Object.keys(process.env)) {
+    if (k === "LINEAR_API_KEY" || k.startsWith("LINEAR_")) delete process.env[k];
+  }
+
   const handles: Array<{ stop: () => void }> = [];
 
   for (const w of cfg.watch) {
@@ -48,51 +55,78 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
       watch: w,
       stateIds,
       onDispatch: async (issue) => {
-        await dispatchIssue(db, issue, w, executeTask);
+        const res = await dispatchIssue(db, issue, w, executeTask);
+        // Always move to In Progress — the issue was claimed regardless of launch outcome.
         await client.updateState(issue.id, stateIds.inProgress);
+
         const row = db
           .prepare(
             "SELECT s.branch_name as branch, s.worktree_path as wp, s.local_cli_agent_id as engine FROM tasks t LEFT JOIN sessions s ON s.id = t.session_id WHERE t.linear_issue_id = ?",
           )
           .get(issue.id) as { branch?: string; wp?: string; engine?: string } | undefined;
-        if (!row?.wp) {
-          console.warn(
-            "[linear dispatch] no session row for",
-            issue.identifier,
-            "— executeTask may have failed",
+
+        if (res.ok) {
+          if (!row?.wp) {
+            console.warn(
+              "[linear dispatch] no session row for",
+              issue.identifier,
+              "— executeTask may have failed",
+            );
+          }
+          const stamp = buildEnvStamp(hostname(), row?.wp ?? "?", "new");
+          const commentId = await client.createComment(
+            issue.id,
+            assembleWorkpad({
+              engine: (row?.engine as EngineId) ?? "claude",
+              branch: row?.branch ?? "?",
+              state: "In Progress",
+              stamp,
+            }),
+          );
+          db.prepare("UPDATE tasks SET linear_workpad_comment_id = ? WHERE linear_issue_id = ?").run(
+            commentId,
+            issue.id,
+          );
+        } else {
+          // Launch failed — create a blocked workpad comment so the Linear issue reflects the failure.
+          const stamp = buildEnvStamp(hostname(), "?", "new");
+          const commentId = await client.createComment(
+            issue.id,
+            assembleWorkpad({
+              engine: (row?.engine as EngineId) ?? "claude",
+              branch: row?.branch ?? "?",
+              state: "In Progress — BLOCKED",
+              stamp,
+              agentBody: `**BLOCKED:** launch failed: ${res.error}`,
+            }),
+          );
+          db.prepare("UPDATE tasks SET linear_workpad_comment_id = ? WHERE linear_issue_id = ?").run(
+            commentId,
+            issue.id,
           );
         }
-        const stamp = buildEnvStamp(hostname(), row?.wp ?? "?", "new");
-        const commentId = await client.createComment(
-          issue.id,
-          assembleWorkpad({
-            engine: (row?.engine as EngineId) ?? "claude",
-            branch: row?.branch ?? "?",
-            state: "In Progress",
-            stamp,
-          }),
-        );
-        db.prepare("UPDATE tasks SET linear_workpad_comment_id = ? WHERE linear_issue_id = ?").run(
-          commentId,
-          issue.id,
-        );
       },
       finalize: async () => {
+        // FIX 1: include 'idle' — process-manager marks local-CLI sessions 'idle' on exit.
         const rows = db
           .prepare(
-            "SELECT t.linear_issue_id as iid, t.linear_workpad_comment_id as cid, s.status as st, s.branch_name as branch, s.worktree_path as wp, s.local_cli_agent_id as engine FROM tasks t JOIN sessions s ON s.id = t.session_id WHERE t.linear_issue_id IS NOT NULL AND t.linear_workpad_comment_id IS NOT NULL AND s.status IN ('completed','failed','killed') AND t.status = 'in_progress' AND t.project_id = ?",
+            "SELECT t.linear_issue_id as iid, t.linear_workpad_comment_id as cid, s.status as st, s.branch_name as branch, s.worktree_path as wp, s.local_cli_agent_id as engine FROM tasks t JOIN sessions s ON s.id = t.session_id WHERE t.linear_issue_id IS NOT NULL AND t.linear_workpad_comment_id IS NOT NULL AND s.status IN ('idle','completed','failed','killed') AND t.status = 'in_progress' AND t.project_id = ?",
           )
           .all(w.devlogProjectId) as Array<{
           iid: string;
           cid: string;
-          st: "completed" | "failed" | "killed";
+          st: "idle" | "completed" | "failed" | "killed";
           branch: string;
           wp: string;
           engine: string;
         }>;
         for (const r of rows) {
           try {
-            await finalizeOutcome(
+            // FIX 2: fetch the issue's current Linear state before calling finalizeOutcome,
+            // so the terminal-state guard can skip issues a human already closed.
+            const currentState = (await client.fetchStateNameByIssue(r.iid)) ?? "";
+
+            const result = await finalizeOutcome(
               r.st,
               {
                 client,
@@ -102,10 +136,13 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
                 branch: r.branch,
                 engine: (r.engine as EngineId) ?? "claude",
                 stamp: buildEnvStamp(hostname(), r.wp, "done"),
+                currentState,
+                // FIX 7: use execFile (no shell) to avoid injection via branch name.
                 detectPr: async () => {
                   try {
-                    const { stdout } = await execAsync(
-                      `gh pr list --head '${r.branch}' --json url --jq '.[0].url'`,
+                    const { stdout } = await execFileAsync(
+                      "gh",
+                      ["pr", "list", "--head", r.branch, "--json", "url", "--jq", ".[0].url"],
                       { cwd: r.wp },
                     );
                     return stdout.trim();
@@ -117,9 +154,13 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
               },
               w,
             );
+
+            // FIX 2: derive task status from the semantic return value, not raw session status.
+            const taskStatus =
+              result === "review" ? "review" : result === "blocked" ? "blocked" : "done";
             db.prepare(
-              "UPDATE tasks SET status = CASE WHEN ? = 'completed' THEN 'review' ELSE 'blocked' END, updated_at = datetime('now') WHERE linear_issue_id = ?",
-            ).run(r.st, r.iid);
+              "UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE linear_issue_id = ?",
+            ).run(taskStatus, r.iid);
           } catch (e) {
             console.error("[linear finalize] row failed", r.iid, e);
           }

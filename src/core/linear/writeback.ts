@@ -1,6 +1,6 @@
 import type { LinearClientI } from "./client";
 import type { EngineId, LinearWatchConfig } from "./types";
-import { assembleWorkpad } from "./state-map";
+import { assembleWorkpad, isTerminal } from "./state-map";
 
 export interface FinalizeCtx {
   client: Pick<LinearClientI, "updateState" | "updateComment">;
@@ -11,26 +11,52 @@ export interface FinalizeCtx {
   engine: EngineId;
   stamp: string;
   cost?: string | null;
+  /** Current Linear state name of the issue (fetched before calling). */
+  currentState: string;
   detectPr: () => Promise<string>;
   readWorkpad: () => Promise<string>;
 }
 
-export type SessionOutcome = "completed" | "failed" | "killed";
+export type SessionOutcome = "idle" | "completed" | "failed" | "killed";
 
-export async function finalizeOutcome(outcome: SessionOutcome, ctx: FinalizeCtx, _w: LinearWatchConfig): Promise<void> {
+export type FinalizeResult = "review" | "blocked" | "skipped";
+
+export async function finalizeOutcome(
+  outcome: SessionOutcome,
+  ctx: FinalizeCtx,
+  w: LinearWatchConfig,
+): Promise<FinalizeResult> {
+  // Terminal-state guard: if a human already closed the issue, do nothing.
+  if (isTerminal(ctx.currentState, w)) {
+    return "skipped";
+  }
+
   const agentBody = await safe(ctx.readWorkpad);
-  if (outcome === "completed") {
+
+  if (outcome === "idle" || outcome === "completed") {
     const pr = await safe(ctx.detectPr);
     if (pr) {
       await ctx.client.updateComment(
         ctx.commentId,
-        assembleWorkpad({ engine: ctx.engine, branch: ctx.branch, state: "In Review", stamp: ctx.stamp, pr, cost: ctx.cost, agentBody }),
+        assembleWorkpad({
+          engine: ctx.engine,
+          branch: ctx.branch,
+          state: "In Review",
+          stamp: ctx.stamp,
+          pr,
+          cost: ctx.cost,
+          agentBody,
+        }),
       );
       await ctx.client.updateState(ctx.issueId, ctx.reviewStateId);
-      return;
+      return "review";
     }
   }
-  const reason = outcome === "completed" ? "session ended but no PR was opened" : `agent ${outcome}`;
+
+  const reason =
+    outcome === "idle" || outcome === "completed"
+      ? "session ended but no PR was opened"
+      : `agent ${outcome}`;
   await ctx.client.updateComment(
     ctx.commentId,
     assembleWorkpad({
@@ -42,6 +68,7 @@ export async function finalizeOutcome(outcome: SessionOutcome, ctx: FinalizeCtx,
       agentBody: `**BLOCKED:** ${reason}. Left for a human.\n\n${agentBody ?? ""}`,
     }),
   );
+  return "blocked";
 }
 
 async function safe<T>(fn: () => Promise<T>): Promise<T | null> {

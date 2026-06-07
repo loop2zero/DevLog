@@ -2,9 +2,9 @@ import type Database from "better-sqlite3";
 import { randomBytes } from "crypto";
 import type { LinearIssue, LinearWatchConfig } from "./types";
 import { resolveEngine } from "./state-map";
-import { buildEngineExecuteInput } from "../task-execution";
+import { buildEngineExecuteInput, type ExecuteResult, type ExecuteError } from "../task-execution";
 
-type ExecuteFn = (taskId: string, projectId: string, payload: unknown) => Promise<unknown>;
+type ExecuteFn = (taskId: string, projectId: string, payload: unknown) => Promise<ExecuteResult>;
 
 export function alreadyLinked(db: Database.Database, issueId: string): boolean {
   return !!db.prepare("SELECT 1 FROM tasks WHERE linear_issue_id = ?").get(issueId);
@@ -15,8 +15,11 @@ export async function dispatchIssue(
   issue: LinearIssue,
   w: LinearWatchConfig,
   execute: ExecuteFn,
-): Promise<void> {
-  if (alreadyLinked(db, issue.id)) return; // idempotency guard
+): Promise<ExecuteResult> {
+  if (alreadyLinked(db, issue.id)) {
+    // Already dispatched — return a synthetic ok result so caller treats as claimed.
+    return { ok: true, session: null as any, worktree: null as any };
+  }
 
   const engine = resolveEngine(issue.labels, w);
   const taskId = randomBytes(8).toString("hex");
@@ -35,7 +38,16 @@ export async function dispatchIssue(
     issue.identifier,
   );
 
-  await execute(taskId, w.devlogProjectId, buildEngineExecuteInput(engine));
+  const res = await execute(taskId, w.devlogProjectId, buildEngineExecuteInput(engine));
+
+  if (!res.ok) {
+    // Mark the mirror task as blocked with the failure reason.
+    db.prepare(
+      "UPDATE tasks SET status = 'blocked', fail_reason = ?, updated_at = datetime('now') WHERE id = ?",
+    ).run((res as ExecuteError).error, taskId);
+  }
+
+  return res;
 }
 
 function buildDispatchPrompt(issue: LinearIssue): string {

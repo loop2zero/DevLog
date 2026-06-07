@@ -37,7 +37,6 @@ export function getDb(): Database.Database {
   _db.pragma("foreign_keys = ON");
   _db.exec(SCHEMA);
   migrateTasksV2(_db);
-  migrateLinearColumns(_db);
 
   // Migrate: add claude_session_id column if missing
   try {
@@ -210,6 +209,11 @@ export function getDb(): Database.Database {
     _recovered = true;
     recoverOrphanedSessions(_db);
   }
+
+  // FIX 5: migrateLinearColumns must run LAST — after all table-recreation migrations
+  // (tasks_new, sessions_new) — so the linear columns are never dropped by a later
+  // CREATE TABLE … tasks_new / DROP TABLE tasks sequence.
+  migrateLinearColumns(_db);
 
   return _db;
 }
