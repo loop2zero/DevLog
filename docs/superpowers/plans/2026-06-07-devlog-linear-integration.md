@@ -12,6 +12,20 @@
 
 ---
 
+## Build Environment & Test Conventions (AUTHORITATIVE — overrides any `bun:test` snippets below)
+
+DevLog runs tests on **Node 20** via `node --test`, NOT Bun (`better-sqlite3` is native and does not load under `bun test`). All test code blocks below were drafted with `bun:test`/`expect`; **translate them to the conventions here**:
+
+- **Framework:** `import { test } from "node:test"` + `import assert from "node:assert/strict"`. Use `assert.equal`, `assert.deepEqual`, `assert.ok`, `assert.throws` — NOT `expect`.
+- **DB tests:** use `makeTestDb()`, `insertTask(db, {...})`, `insertSession(db, {...})` from `src/core/__tests__/test-helpers.ts` (in-memory better-sqlite3 seeded with `SCHEMA`). Do NOT `new Database(":memory:")` by hand.
+- **Test file location:** `src/core/__tests__/linear-<name>.test.ts` — the runner glob only covers `src/core/__tests__/*.test.ts`. Source files still live in `src/core/linear/`.
+- **Run one file:** `node --test --import tsx --test-reporter spec src/core/__tests__/linear-<name>.test.ts`
+- **Run full suite:** `bun run test` (the glob was fixed in Task 0; husky pre-commit = `typecheck` + full suite, currently green at 208/0). Commit normally — do NOT use `--no-verify` for code.
+- **Schema parity (important for Task 2):** `makeTestDb()` builds from the `SCHEMA` constant in `src/core/db-schema.ts`, not from the migration functions. So Task 2 must add the three `linear_*` columns to BOTH the runtime migration (`migrateLinearColumns`, for existing DBs) AND the `SCHEMA` constant in `db-schema.ts` (so fresh/test DBs have them). Tests should then use `makeTestDb()` directly.
+- **Task 0 (DONE):** `package.json` test globs unquoted so `node --test` resolves them on Node 20.
+
+---
+
 ## File Structure
 
 **Create:**
