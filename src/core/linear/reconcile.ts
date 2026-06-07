@@ -59,6 +59,9 @@ export async function reconcileBreakdowns(deps: ReconcileDeps): Promise<void> {
     for (const idx of decision.advanceIndexes) {
       await client.updateState(subs[idx].cid, stateIds.trigger);
     }
+    // Invariant: update Linear (parent → done) BEFORE the DB finalize stamp. If the
+    // stamp write crashes, the next tick re-selects this parent and retries the close
+    // (idempotent in Linear). The reverse order could orphan an open Linear parent.
     if (decision.closeParent) {
       await client.updateState(pid, stateIds.done);
       db.prepare(

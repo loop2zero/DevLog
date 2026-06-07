@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import type { LinearClientI } from "./client";
 import type { LinearIssue, LinearWatchConfig } from "./types";
+import type { ResolvedStateIds } from "./batch-create";
 import { alreadyLinked } from "./dispatcher";
 
 export interface TickDeps {
@@ -10,7 +11,7 @@ export interface TickDeps {
   onDispatch: (issue: LinearIssue) => Promise<void>;
   finalize: () => Promise<void>;
   reconcile: () => Promise<void>;
-  stateIds: { inProgress: string; review: string };
+  stateIds: ResolvedStateIds;
 }
 
 export async function tick(deps: TickDeps): Promise<void> {
