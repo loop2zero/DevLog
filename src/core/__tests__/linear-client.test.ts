@@ -57,3 +57,31 @@ test("fetchWorkflowStates flattens teams→states, dedupes by id, includes type"
     { id: "s3", name: "Done", type: "completed" },
   ]);
 });
+
+test("createIssue sends issueCreate with input and returns id+identifier", async () => {
+  const captured: any[] = [];
+  const fakeFetch = async (_u: string, init: any) => { captured.push(JSON.parse(init.body)); return { json: async () => ({ data: { issueCreate: { success: true, issue: { id: "n1", identifier: "ARC-9" } } } }) }; };
+  const c = new LinearClient("KEY", fakeFetch as any);
+  const out = await c.createIssue({ teamId: "t1", title: "Ledger slice", description: "do x", parentId: "p1", labelIds: ["l1"], stateId: "st1" });
+  assert.ok(captured[0].query.includes("issueCreate"));
+  assert.deepEqual(captured[0].variables.input, { teamId: "t1", title: "Ledger slice", description: "do x", parentId: "p1", labelIds: ["l1"], stateId: "st1" });
+  assert.deepEqual(out, { id: "n1", identifier: "ARC-9" });
+});
+
+test("createRelation sends issueRelationCreate with blocks type", async () => {
+  const captured: any[] = [];
+  const fakeFetch = async (_u: string, init: any) => { captured.push(JSON.parse(init.body)); return { json: async () => ({ data: { issueRelationCreate: { success: true } } }) }; };
+  const c = new LinearClient("KEY", fakeFetch as any);
+  await c.createRelation("a", "b", "blocks");
+  assert.ok(captured[0].query.includes("issueRelationCreate"));
+  assert.deepEqual(captured[0].variables.input, { issueId: "a", relatedIssueId: "b", type: "blocks" });
+});
+
+test("updateIssueBody sends issueUpdate with description", async () => {
+  const captured: any[] = [];
+  const fakeFetch = async (_u: string, init: any) => { captured.push(JSON.parse(init.body)); return { json: async () => ({ data: { issueUpdate: { success: true } } }) }; };
+  const c = new LinearClient("KEY", fakeFetch as any);
+  await c.updateIssueBody("i1", "new body");
+  assert.ok(captured[0].query.includes("issueUpdate"));
+  assert.deepEqual(captured[0].variables, { id: "i1", desc: "new body" });
+});

@@ -9,6 +9,9 @@ export interface LinearClientI {
   updateState(issueId: string, stateId: string): Promise<void>;
   createComment(issueId: string, body: string): Promise<string>;
   updateComment(commentId: string, body: string): Promise<void>;
+  createIssue(input: { teamId: string; title: string; description?: string; parentId?: string; labelIds?: string[]; stateId?: string }): Promise<{ id: string; identifier: string }>;
+  createRelation(issueId: string, relatedIssueId: string, type: "blocks"): Promise<void>;
+  updateIssueBody(issueId: string, body: string): Promise<void>;
 }
 
 const Q_TRIGGER = `query($slug:String!,$state:String!){ issues(filter:{project:{slugId:{eq:$slug}}, state:{name:{eq:$state}}}, first:25){ nodes{ id identifier title description state{name} labels{ nodes{ name } } } } }`;
@@ -17,6 +20,9 @@ const Q_WORKFLOW_STATES = `query($slug:String!){ projects(filter:{slugId:{eq:$sl
 const M_STATE = `mutation($id:String!,$stateId:String!){ issueUpdate(id:$id, input:{stateId:$stateId}){ success } }`;
 const M_COMMENT = `mutation($issueId:String!,$body:String!){ commentCreate(input:{issueId:$issueId, body:$body}){ success comment{ id } } }`;
 const M_COMMENT_UPD = `mutation($id:String!,$body:String!){ commentUpdate(id:$id, input:{body:$body}){ success } }`;
+const M_ISSUE_CREATE = `mutation($input:IssueCreateInput!){ issueCreate(input:$input){ success issue{ id identifier } } }`;
+const M_RELATION = `mutation($input:IssueRelationCreateInput!){ issueRelationCreate(input:$input){ success } }`;
+const M_ISSUE_BODY = `mutation($id:String!,$desc:String!){ issueUpdate(id:$id, input:{description:$desc}){ success } }`;
 
 export class LinearClient implements LinearClientI {
   constructor(private key: string, private fetchFn: FetchFn = fetch) {}
@@ -72,5 +78,18 @@ export class LinearClient implements LinearClientI {
 
   async updateComment(commentId: string, body: string): Promise<void> {
     await this.gql(M_COMMENT_UPD, { id: commentId, body });
+  }
+
+  async createIssue(input: { teamId: string; title: string; description?: string; parentId?: string; labelIds?: string[]; stateId?: string }): Promise<{ id: string; identifier: string }> {
+    const d = await this.gql<{ issueCreate: { issue: { id: string; identifier: string } } }>(M_ISSUE_CREATE, { input });
+    return d.issueCreate.issue;
+  }
+
+  async createRelation(issueId: string, relatedIssueId: string, type: "blocks"): Promise<void> {
+    await this.gql(M_RELATION, { input: { issueId, relatedIssueId, type } });
+  }
+
+  async updateIssueBody(issueId: string, body: string): Promise<void> {
+    await this.gql(M_ISSUE_BODY, { id: issueId, desc: body });
   }
 }
