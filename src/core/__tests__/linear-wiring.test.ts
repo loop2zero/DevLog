@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildEnvStamp, resolveStateIds } from "../linear/wiring";
+import { buildEnvStamp, resolveStateIds, isBreakdownIssue } from "../linear/wiring";
 import { normalizeWatchConfig } from "../linear/types";
 
 test("buildEnvStamp formats host:path@sha", () => {
@@ -29,4 +29,10 @@ test("resolveStateIds throws when a required state is missing", async () => {
   const w = normalizeWatchConfig({ projectSlugId: "p", devlogProjectId: "r" });
   const client = { async fetchWorkflowStates() { return [{ id: "td", name: "Todo" }]; } };
   await assert.rejects(() => resolveStateIds(client as any, w));
+});
+
+test("isBreakdownIssue matches the configured breakdown label case-insensitively", () => {
+  const w = normalizeWatchConfig({ projectSlugId: "p", devlogProjectId: "r" });
+  assert.equal(isBreakdownIssue({ labels: ["Design-Breakdown"] } as any, w), true);
+  assert.equal(isBreakdownIssue({ labels: ["claude"] } as any, w), false);
 });

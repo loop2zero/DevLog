@@ -3,14 +3,16 @@ import { promisify } from "util";
 import { readFile } from "fs/promises";
 import { hostname } from "os";
 import { getDb } from "../db";
-import { getLinearConfig } from "../project-adapter";
+import { getLinearConfig, getRepoRoot } from "../project-adapter";
 import { LinearClient, type LinearClientI } from "./client";
 import { dispatchIssue } from "./dispatcher";
 import { finalizeOutcome } from "./writeback";
 import { assembleWorkpad } from "./state-map";
 import { executeTask } from "../task-execution";
 import { startPoller, type TickDeps } from "./poller";
-import type { EngineId, LinearWatchConfig } from "./types";
+import { runBreakdown } from "./batch-create";
+import { reconcileBreakdowns } from "./reconcile";
+import type { EngineId, LinearIssue, LinearWatchConfig } from "./types";
 
 const execFileAsync = promisify(execFile);
 
@@ -45,6 +47,10 @@ export async function resolveStateIds(
   };
 }
 
+export function isBreakdownIssue(issue: LinearIssue, w: LinearWatchConfig): boolean {
+  return issue.labels.some((l) => l.trim().toLowerCase() === w.breakdownLabel);
+}
+
 export async function startWatching(): Promise<Array<{ stop: () => void }>> {
   const key = process.env.LINEAR_API_KEY;
   if (!key) throw new Error("LINEAR_API_KEY not set");
@@ -63,14 +69,24 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
 
   for (const w of cfg.watch) {
     const stateIds = await resolveStateIds(client, w);
+    const teamAndLabels = await client.fetchTeamAndLabels(w.projectSlugId);
+    const repoRoot = getRepoRoot(w.devlogProjectId);
     const deps: TickDeps = {
       db,
       client,
       watch: w,
       stateIds,
-      // TODO(task 11): wire reconcileBreakdowns
-      reconcile: async () => {},
+      reconcile: async () => {
+        await reconcileBreakdowns({ db, client, w, stateIds });
+      },
       onDispatch: async (issue) => {
+        if (isBreakdownIssue(issue, w)) {
+          const result = await runBreakdown({ db, client, w, parent: issue, repoRoot, stateIds, teamAndLabels });
+          if (!result.ok) {
+            await client.createComment(issue.id, `**Breakdown failed:** ${result.error}. Fix \`.devlog/breakdown.json\` and re-label.`);
+          }
+          return;
+        }
         const res = await dispatchIssue(db, issue, w, executeTask);
         // Always move to In Progress — the issue was claimed regardless of launch outcome.
         await client.updateState(issue.id, stateIds.inProgress);
