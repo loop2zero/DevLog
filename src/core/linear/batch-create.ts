@@ -23,7 +23,7 @@ export interface RunBreakdownDeps {
   parent: LinearIssue;
   repoRoot: string;
   stateIds: ResolvedStateIds;
-  teamAndLabels: { teamId: string; labels: Record<string, string> };
+  teamAndLabels: { teamId: string; projectId: string; labels: Record<string, string> };
 }
 
 export type RunBreakdownResult = { ok: true; created: number } | { ok: false; error: string };
@@ -84,6 +84,7 @@ export async function runBreakdown(deps: RunBreakdownDeps): Promise<RunBreakdown
         parentId: parent.id,
         labelIds,
         stateId: i === 0 ? stateIds.trigger : stateIds.parked,
+        projectId: teamAndLabels.projectId,
       });
       childId = out.id;
       childIdentifier = out.identifier;

@@ -15,7 +15,7 @@ function tmpRepoWith(plan: unknown): string {
 }
 
 const stateIds = { trigger: "todo", inProgress: "prog", review: "rev", done: "done", parked: "back", parkedName: "Backlog", terminalNames: ["Done", "Canceled"] };
-const teamAndLabels = { teamId: "team1", labels: { claude: "lc", codex: "lx" } };
+const teamAndLabels = { teamId: "team1", projectId: "proj1", labels: { claude: "lc", codex: "lx" } };
 const parent = { id: "p1", identifier: "ARC-1", title: "Big REQ", description: "", stateName: "Todo", labels: ["design-breakdown"] };
 
 function fakeClient(overrides: any = {}) {
@@ -49,6 +49,7 @@ test("runBreakdown creates subs, wires chain, sets states, stamps parent row", a
   assert.deepEqual(calls.created[0].input.labelIds, ["lc"]);
   assert.equal(calls.created[1].input.stateId, "back");
   assert.deepEqual(calls.created[1].input.labelIds, ["lx"]);
+  assert.equal(calls.created[0].input.projectId, "proj1");
   assert.deepEqual(calls.relations, [["c1", "c2"]]);
   assert.deepEqual(calls.bodies, [["p1", "rationale"]]);
   assert.ok(calls.states.some(([id, s]: any) => id === "p1" && s === "prog"));
@@ -105,7 +106,7 @@ test("runBreakdown is self-idempotent: a second call is a no-op", async () => {
 test("runBreakdown never applies the breakdown label to a created sub", async () => {
   const db = makeTestDb();
   // teamAndLabels maps the breakdown label too, to prove it's filtered out, not just unmapped
-  const tl = { teamId: "team1", labels: { claude: "lc", "design-breakdown": "lbd" } };
+  const tl = { teamId: "team1", projectId: "proj1", labels: { claude: "lc", "design-breakdown": "lbd" } };
   const repo = tmpRepoWith({ parentSummary: "r", subIssues: [
     { title: "A", description: "", labels: ["claude", "design-breakdown"] },
   ] });

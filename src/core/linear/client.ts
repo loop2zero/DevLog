@@ -9,18 +9,18 @@ export interface LinearClientI {
   updateState(issueId: string, stateId: string): Promise<void>;
   createComment(issueId: string, body: string): Promise<string>;
   updateComment(commentId: string, body: string): Promise<void>;
-  createIssue(input: { teamId: string; title: string; description?: string; parentId?: string; labelIds?: string[]; stateId?: string }): Promise<{ id: string; identifier: string }>;
+  createIssue(input: { teamId: string; title: string; description?: string; parentId?: string; labelIds?: string[]; stateId?: string; projectId?: string }): Promise<{ id: string; identifier: string }>;
   createRelation(issueId: string, relatedIssueId: string, type: "blocks"): Promise<void>;
   updateIssueBody(issueId: string, body: string): Promise<void>;
   fetchChildIssues(parentId: string): Promise<Array<{ id: string; identifier: string; title: string; stateName: string }>>;
-  fetchTeamAndLabels(projectSlugId: string): Promise<{ teamId: string; labels: Record<string, string> }>;
+  fetchTeamAndLabels(projectSlugId: string): Promise<{ teamId: string; projectId: string; labels: Record<string, string> }>;
 }
 
 const Q_TRIGGER = `query($slug:String!,$state:String!){ issues(filter:{project:{slugId:{eq:$slug}}, state:{name:{eq:$state}}}, first:25){ nodes{ id identifier title description state{name} labels{ nodes{ name } } } } }`;
 const Q_STATE = `query($id:String!){ issue(id:$id){ state{ name } } }`;
 const Q_WORKFLOW_STATES = `query($slug:String!){ projects(filter:{slugId:{eq:$slug}}, first:1){ nodes{ teams{ nodes{ states{ nodes{ id name type } } } } } } }`;
 const Q_CHILDREN = `query($id:String!){ issue(id:$id){ children{ nodes{ id identifier title state{ name } } } } }`;
-const Q_TEAM_LABELS = `query($slug:String!){ projects(filter:{slugId:{eq:$slug}}, first:1){ nodes{ teams{ nodes{ id labels{ nodes{ id name } } } } } } }`;
+const Q_TEAM_LABELS = `query($slug:String!){ projects(filter:{slugId:{eq:$slug}}, first:1){ nodes{ id teams{ nodes{ id labels{ nodes{ id name } } } } } } }`;
 const M_STATE = `mutation($id:String!,$stateId:String!){ issueUpdate(id:$id, input:{stateId:$stateId}){ success } }`;
 const M_COMMENT = `mutation($issueId:String!,$body:String!){ commentCreate(input:{issueId:$issueId, body:$body}){ success comment{ id } } }`;
 const M_COMMENT_UPD = `mutation($id:String!,$body:String!){ commentUpdate(id:$id, input:{body:$body}){ success } }`;
@@ -84,7 +84,7 @@ export class LinearClient implements LinearClientI {
     await this.gql(M_COMMENT_UPD, { id: commentId, body });
   }
 
-  async createIssue(input: { teamId: string; title: string; description?: string; parentId?: string; labelIds?: string[]; stateId?: string }): Promise<{ id: string; identifier: string }> {
+  async createIssue(input: { teamId: string; title: string; description?: string; parentId?: string; labelIds?: string[]; stateId?: string; projectId?: string }): Promise<{ id: string; identifier: string }> {
     const d = await this.gql<{ issueCreate: { issue: { id: string; identifier: string } } }>(M_ISSUE_CREATE, { input });
     return d.issueCreate.issue;
   }
@@ -102,12 +102,14 @@ export class LinearClient implements LinearClientI {
     return (d.issue?.children.nodes ?? []).map((n) => ({ id: n.id, identifier: n.identifier, title: n.title, stateName: n.state.name }));
   }
 
-  async fetchTeamAndLabels(projectSlugId: string): Promise<{ teamId: string; labels: Record<string, string> }> {
-    const d = await this.gql<{ projects: { nodes: Array<{ teams: { nodes: Array<{ id: string; labels: { nodes: Array<{ id: string; name: string }> } }> } }> } }>(Q_TEAM_LABELS, { slug: projectSlugId });
-    const team = d.projects.nodes[0]?.teams.nodes[0];
+  async fetchTeamAndLabels(projectSlugId: string): Promise<{ teamId: string; projectId: string; labels: Record<string, string> }> {
+    const d = await this.gql<{ projects: { nodes: Array<{ id: string; teams: { nodes: Array<{ id: string; labels: { nodes: Array<{ id: string; name: string }> } }> } }> } }>(Q_TEAM_LABELS, { slug: projectSlugId });
+    const project = d.projects.nodes[0];
+    if (!project) throw new Error(`No project for slug ${projectSlugId}`);
+    const team = project.teams.nodes[0];
     if (!team) throw new Error(`No team for project ${projectSlugId}`);
     const labels: Record<string, string> = {};
     for (const l of team.labels.nodes) labels[l.name.trim().toLowerCase()] = l.id;
-    return { teamId: team.id, labels };
+    return { teamId: team.id, projectId: project.id, labels };
   }
 }
