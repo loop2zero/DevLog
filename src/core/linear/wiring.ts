@@ -71,8 +71,19 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
 
   const handles: Array<{ stop: () => void }> = [];
 
+  // Track issues we've already posted a breakdown-failure comment for, so a
+  // malformed/missing .devlog/breakdown.json doesn't spam a new comment every
+  // poll tick. We still retry the breakdown each tick (silently); fixing the
+  // file clears the entry on success and auto-recovers.
+  const breakdownFailedComments = new Set<string>();
+
   for (const w of cfg.watch) {
     const stateIds = await resolveStateIds(client, w);
+    // v1 assumption: a watched project maps to a single Linear team. teamAndLabels uses
+    // that team (fetchTeamAndLabels picks the project's first team); multi-team projects
+    // (children mis-filed to the first team) are deferred to v2.
+    // resolveStateIds is fail-fast: it requires the team to have a backlog-type +
+    // completed-type state, else startWatching throws here.
     const teamAndLabels = await client.fetchTeamAndLabels(w.projectSlugId);
     const repoRoot = getRepoRoot(w.devlogProjectId);
     const deps: TickDeps = {
@@ -87,8 +98,15 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
         if (isBreakdownIssue(issue, w)) {
           const result = await runBreakdown({ db, client, w, parent: issue, repoRoot, stateIds, teamAndLabels });
           if (!result.ok) {
-            await client.createComment(issue.id, `**Breakdown failed:** ${result.error}. Fix \`.devlog/breakdown.json\` and re-label.`);
+            // Comment once per issue per process; keep retrying each tick so fixing
+            // .devlog/breakdown.json auto-recovers without spamming the issue.
+            if (!breakdownFailedComments.has(issue.id)) {
+              breakdownFailedComments.add(issue.id);
+              await client.createComment(issue.id, `**Breakdown failed:** ${result.error}. Fix \`.devlog/breakdown.json\`; the watcher will retry automatically.`);
+            }
+            return;
           }
+          breakdownFailedComments.delete(issue.id);
           return;
         }
         const res = await dispatchIssue(db, issue, w, executeTask);
