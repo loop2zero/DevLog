@@ -6,6 +6,7 @@ export interface SubIssueSpec {
 
 export interface BreakdownPlan {
   parentSummary: string;
+  parentIdentifier?: string;
   subIssues: SubIssueSpec[];
 }
 
@@ -34,9 +35,19 @@ export function parseBreakdown(raw: string): ParseResult {
       labels: Array.isArray(s.labels) ? s.labels.filter((l: unknown): l is string => typeof l === "string") : [],
     });
   }
+  const seenTitles = new Set<string>();
+  for (const s of subIssues) {
+    const k = s.title.trim().toLowerCase();
+    if (seenTitles.has(k)) return { ok: false, error: `duplicate sub-issue title: "${s.title}"` };
+    seenTitles.add(k);
+  }
   return {
     ok: true,
-    plan: { parentSummary: typeof data.parentSummary === "string" ? data.parentSummary : "", subIssues },
+    plan: {
+      parentSummary: typeof data.parentSummary === "string" ? data.parentSummary : "",
+      parentIdentifier: typeof data.parentIdentifier === "string" ? data.parentIdentifier : undefined,
+      subIssues,
+    },
   };
 }
 

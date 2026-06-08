@@ -49,7 +49,7 @@ test("runBreakdown creates subs, wires chain, sets states, stamps parent row", a
   assert.deepEqual(calls.created[0].input.labelIds, ["lc"]);
   assert.equal(calls.created[1].input.stateId, "back");
   assert.deepEqual(calls.created[1].input.labelIds, ["lx"]);
-  assert.deepEqual(calls.relations, [["c2", "c1"]]);
+  assert.deepEqual(calls.relations, [["c1", "c2"]]);
   assert.deepEqual(calls.bodies, [["p1", "rationale"]]);
   assert.ok(calls.states.some(([id, s]: any) => id === "p1" && s === "prog"));
   const subs = db.prepare("SELECT child_issue_id, position FROM linear_breakdown_subs WHERE parent_issue_id='p1' ORDER BY position").all();
@@ -114,4 +114,15 @@ test("runBreakdown never applies the breakdown label to a created sub", async ()
   const res = await runBreakdown({ db, client: client as any, w, parent, repoRoot: repo, stateIds, teamAndLabels: tl });
   assert.equal(res.ok, true);
   assert.deepEqual(calls.created[0].input.labelIds, ["lc"]); // "lbd" (breakdown label id) excluded
+});
+
+test("runBreakdown rejects a breakdown.json whose parentIdentifier doesn't match", async () => {
+  const db = makeTestDb();
+  const repo = tmpRepoWith({ parentIdentifier: "ARC-999", parentSummary: "r", subIssues: [{ title: "A", description: "", labels: [] }] });
+  const w = normalizeWatchConfig({ projectSlugId: "p", devlogProjectId: "repo1" });
+  const { client } = fakeClient();
+  const res = await runBreakdown({ db, client: client as any, w, parent, repoRoot: repo, stateIds, teamAndLabels });
+  assert.equal(res.ok, false);
+  const prow = db.prepare("SELECT 1 FROM tasks WHERE linear_issue_id='p1'").get();
+  assert.equal(prow, undefined);
 });

@@ -32,8 +32,9 @@ export async function runBreakdown(deps: RunBreakdownDeps): Promise<RunBreakdown
   const { db, client, parent, repoRoot, stateIds, teamAndLabels } = deps;
 
   // Self-idempotent: if this parent was already fully batch-created (stamp present),
-  // do nothing. Combined with stamping LAST, a mid-run crash leaves NO stamp, so the
-  // next call re-enters and skip-by-title recovers; a completed run is a no-op here.
+  // do nothing. The stamp is written just before the parent state-move (see ordering
+  // invariant below), so a crash before the stamp leaves the parent in trigger state and
+  // the next call re-enters and skip-by-title recovers; a completed run is a no-op here.
   // This makes runBreakdown safe regardless of the caller's own guarding.
   const alreadyDone = db
     .prepare("SELECT 1 FROM tasks WHERE linear_issue_id = ? AND linear_breakdown_done_at IS NOT NULL")
@@ -49,6 +50,9 @@ export async function runBreakdown(deps: RunBreakdownDeps): Promise<RunBreakdown
   const parsed = parseBreakdown(raw);
   if (!parsed.ok) return { ok: false, error: parsed.error };
   const plan = parsed.plan;
+  if (plan.parentIdentifier && plan.parentIdentifier !== parent.identifier) {
+    return { ok: false, error: `breakdown.json targets ${plan.parentIdentifier}, but this issue is ${parent.identifier} — stale or mismatched file` };
+  }
 
   const existing = await client.fetchChildIssues(parent.id);
   const byTitle = new Map(existing.map((c) => [c.title.trim().toLowerCase(), c]));
@@ -67,7 +71,11 @@ export async function runBreakdown(deps: RunBreakdownDeps): Promise<RunBreakdown
     } else {
       const labelIds = sub.labels
         .filter((l) => l.trim().toLowerCase() !== deps.w.breakdownLabel)
-        .map((l) => teamAndLabels.labels[l.trim().toLowerCase()])
+        .map((l) => {
+          const id = teamAndLabels.labels[l.trim().toLowerCase()];
+          if (!id) console.warn(`[breakdown] sub "${sub.title}": label "${l}" not found in team — dropped (engine routing may fall back to default)`);
+          return id;
+        })
         .filter((x): x is string => typeof x === "string");
       const out = await client.createIssue({
         teamId: teamAndLabels.teamId,
@@ -94,20 +102,27 @@ export async function runBreakdown(deps: RunBreakdownDeps): Promise<RunBreakdown
 
   for (let i = 1; i < childIds.length; i++) {
     try {
-      await client.createRelation(childIds[i], childIds[i - 1], "blocks");
+      await client.createRelation(childIds[i - 1], childIds[i], "blocks");
     } catch {
       /* relation may already exist on a resumed run */
     }
   }
 
   await client.updateIssueBody(parent.id, plan.parentSummary);
-  await client.updateState(parent.id, stateIds.inProgress);
 
+  // Crash-safety ordering invariant: stamp the parent tasks row BEFORE moving the
+  // parent out of trigger state. If we crash before the stamp, the parent is still in
+  // trigger state and runBreakdown re-runs (skip-by-title recovers). If we crash after
+  // the stamp but before the state move, reconcileBreakdowns selects the parent (stamp
+  // present) and drives the chain forward. Never move state first: a parent that left
+  // trigger state without a stamp is invisible to both paths → orphaned forever.
   const taskId = randomBytes(8).toString("hex");
   db.prepare(
     `INSERT INTO tasks (id, project_id, title, status, linear_issue_id, linear_identifier, linear_breakdown_done_at, created_at, updated_at)
      VALUES (?, ?, ?, 'in_progress', ?, ?, datetime('now'), datetime('now'), datetime('now'))`,
   ).run(taskId, deps.w.devlogProjectId, parent.title, parent.id, parent.identifier);
+
+  await client.updateState(parent.id, stateIds.inProgress);
 
   return { ok: true, created: createdCount };
 }

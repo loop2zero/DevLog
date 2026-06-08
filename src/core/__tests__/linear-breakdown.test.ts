@@ -35,6 +35,11 @@ test("parseBreakdown rejects a sub-issue with a blank title", () => {
   assert.equal(r.ok, false);
 });
 
+test("parseBreakdown rejects duplicate sub titles (case-insensitive)", () => {
+  const r = parseBreakdown(JSON.stringify({ parentSummary: "x", subIssues: [{ title: "Ledger" }, { title: "ledger" }] }));
+  assert.equal(r.ok, false);
+});
+
 test("renderBreakdownPreview numbers subs and shows blockers + labels", () => {
   const out = renderBreakdownPreview({
     parentSummary: "why",
