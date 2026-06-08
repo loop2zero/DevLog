@@ -13,6 +13,7 @@ export interface ResolvedStateIds {
   done: string;
   parked: string;
   parkedName: string;
+  terminalNames: string[];
 }
 
 export interface RunBreakdownDeps {

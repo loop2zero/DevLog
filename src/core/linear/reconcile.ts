@@ -54,7 +54,8 @@ export async function reconcileBreakdowns(deps: ReconcileDeps): Promise<void> {
     if (subs.length === 0) continue;
 
     const states = await Promise.all(subs.map((s) => client.fetchStateNameByIssue(s.cid)));
-    const decision = computeReconcile(states, { terminalStates: w.terminalStates, parkedState: stateIds.parkedName });
+    const terminalStates = [...new Set([...stateIds.terminalNames, ...w.terminalStates])];
+    const decision = computeReconcile(states, { terminalStates, parkedState: stateIds.parkedName });
 
     for (const idx of decision.advanceIndexes) {
       await client.updateState(subs[idx].cid, stateIds.trigger);

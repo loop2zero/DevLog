@@ -23,6 +23,7 @@ test("resolveStateIds maps trigger/inProgress/review/done/parked by name and typ
   assert.equal(ids.done, "done");
   assert.equal(ids.parked, "back");
   assert.equal(ids.parkedName, "Backlog");
+  assert.deepEqual(ids.terminalNames, ["Done"]);
 });
 
 test("resolveStateIds throws when a required state is missing", async () => {

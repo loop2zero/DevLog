@@ -23,7 +23,7 @@ export function buildEnvStamp(host: string, path: string, sha: string): string {
 export async function resolveStateIds(
   client: Pick<LinearClientI, "fetchWorkflowStates">,
   w: LinearWatchConfig,
-): Promise<{ trigger: string; inProgress: string; review: string; done: string; parked: string; parkedName: string }> {
+): Promise<{ trigger: string; inProgress: string; review: string; done: string; parked: string; parkedName: string; terminalNames: string[] }> {
   const states = await client.fetchWorkflowStates(w.projectSlugId);
   const byName = (name: string) => {
     const s = states.find((x) => x.name.toLowerCase() === name.toLowerCase());
@@ -37,6 +37,9 @@ export async function resolveStateIds(
   };
   const parked = byType("backlog", "parked");
   const done = byType("completed", "done");
+  const terminalNames = states
+    .filter((x) => x.type === "completed" || x.type === "canceled" || x.type === "cancelled")
+    .map((x) => x.name);
   return {
     trigger: byName(w.triggerState),
     inProgress: byName("In Progress"),
@@ -44,6 +47,7 @@ export async function resolveStateIds(
     done: done.id,
     parked: parked.id,
     parkedName: parked.name,
+    terminalNames,
   };
 }
 

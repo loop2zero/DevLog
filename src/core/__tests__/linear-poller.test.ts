@@ -44,7 +44,7 @@ test("tick calls reconcile each cycle", async () => {
     onDispatch: async () => {},
     finalize: async () => {},
     reconcile: async () => { reconciled++; },
-    stateIds: { trigger: "t", inProgress: "ip", review: "rv", done: "d", parked: "b", parkedName: "Backlog" },
+    stateIds: { trigger: "t", inProgress: "ip", review: "rv", done: "d", parked: "b", parkedName: "Backlog", terminalNames: ["Done", "Canceled"] },
   });
   assert.equal(reconciled, 1);
 });

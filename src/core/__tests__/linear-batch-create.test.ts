@@ -14,7 +14,7 @@ function tmpRepoWith(plan: unknown): string {
   return dir;
 }
 
-const stateIds = { trigger: "todo", inProgress: "prog", review: "rev", done: "done", parked: "back", parkedName: "Backlog" };
+const stateIds = { trigger: "todo", inProgress: "prog", review: "rev", done: "done", parked: "back", parkedName: "Backlog", terminalNames: ["Done", "Canceled"] };
 const teamAndLabels = { teamId: "team1", labels: { claude: "lc", codex: "lx" } };
 const parent = { id: "p1", identifier: "ARC-1", title: "Big REQ", description: "", stateName: "Todo", labels: ["design-breakdown"] };
 
