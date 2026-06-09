@@ -13,6 +13,7 @@ import {
   MessageSquare,
   Clock,
 } from "lucide-react";
+import { parseGateStatus } from "@/core/control-plane-state";
 import { isActiveSessionStatus } from "@/core/task-readiness";
 import type { Session } from "@/core/types-dashboard";
 
@@ -40,13 +41,18 @@ export function SessionCard({
   onDelete,
 }: SessionCardProps) {
   const isActive = isActiveSessionStatus(session.status);
+  const gateStatus = parseGateStatus(session.gate_status);
 
   return (
     <Card className="group hover:border-primary/30 transition-colors">
       <CardContent className="p-4 space-y-3">
         {/* Top row: status + time */}
         <div className="flex items-center justify-between">
-          <ProcessIndicator status={session.status} />
+          <ProcessIndicator
+            status={session.status}
+            currentStage={session.current_stage}
+            gateStatus={gateStatus}
+          />
           <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
             <Clock className="h-3 w-3" />
             <span>{timeAgo(session.started_at)}</span>

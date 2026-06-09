@@ -29,6 +29,7 @@ import {
   GitBranch,
   Terminal,
   AlertCircle,
+  Send,
 } from "lucide-react";
 import {
   DEFAULT_AGENT_TEAM_ID,
@@ -36,6 +37,7 @@ import {
 } from "@/core/agent-presets";
 import { AgentSelector } from "@/components/sessions/agent-selector";
 import { useAgentSettings } from "@/hooks/use-agent-settings";
+import { parseGateStatus } from "@/core/control-plane-state";
 import { isTaskExecutableStatus } from "@/core/task-status-flow";
 import type { SessionRuntimeAuthInput } from "@/core/session-runtime-auth";
 import type { Task, TaskPriority, TaskStatus, Worktree } from "@/core/types-dashboard";
@@ -75,6 +77,7 @@ interface TaskDetailDialogProps {
     } & SessionRuntimeAuthInput,
     promptOverride?: string,
   ) => Promise<{ id: string } | null>;
+  onRefresh?: () => Promise<void>;
 }
 
 export function TaskDetailDialog({
@@ -83,6 +86,7 @@ export function TaskDetailDialog({
   onOpenChange,
   onUpdate,
   onLaunchSession,
+  onRefresh,
 }: TaskDetailDialogProps) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -96,6 +100,9 @@ export function TaskDetailDialog({
   const [selectedWorktree, setSelectedWorktree] = useState("");
   const [codingAgentId, setCodingAgentId] = useState(DEFAULT_CODING_AGENT_ID);
   const [agentTeamId, setAgentTeamId] = useState(DEFAULT_AGENT_TEAM_ID);
+  const [gateResponse, setGateResponse] = useState("");
+  const [resolvingGate, setResolvingGate] = useState(false);
+  const [resolvedGateId, setResolvedGateId] = useState<string | null>(null);
   const { settings, runtimePayload, byokReady, loaded, settingsReady } =
     useAgentSettings();
 
@@ -107,6 +114,9 @@ export function TaskDetailDialog({
       setPriority(task.priority);
       setPrompt(task.prompt ?? "");
       setEditing(false);
+      setGateResponse("");
+      setResolvingGate(false);
+      setResolvedGateId(null);
     }
   }, [task]);
 
@@ -180,6 +190,30 @@ export function TaskDetailDialog({
     return new Date(dateStr).toLocaleString();
   };
   const canLaunchSession = isTaskExecutableStatus(task.status);
+  const parsedGateStatus = parseGateStatus(task.gate_status);
+  const gateStatus =
+    parsedGateStatus?.id === resolvedGateId ? null : parsedGateStatus;
+  const currentStage = task.current_stage ?? gateStatus?.stage ?? null;
+
+  const handleResolveGate = async (response: string) => {
+    const trimmed = response.trim();
+    if (!task.session_id || !gateStatus || !trimmed) return;
+
+    setResolvingGate(true);
+    try {
+      const res = await fetch(`/api/sessions/${task.session_id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "resolve_gate", response: trimmed }),
+      });
+      if (!res.ok) return;
+      setResolvedGateId(gateStatus.id);
+      setGateResponse("");
+      await onRefresh?.();
+    } finally {
+      setResolvingGate(false);
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -327,6 +361,66 @@ export function TaskDetailDialog({
             <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
               <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span className="whitespace-pre-wrap">{task.fail_reason}</span>
+            </div>
+          )}
+
+          {currentStage && (
+            <div className="rounded-md border bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
+              {currentStage}
+            </div>
+          )}
+
+          {gateStatus && (
+            <div className="space-y-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" />
+                <div className="min-w-0 space-y-1">
+                  <Badge
+                    variant="outline"
+                    className="border-amber-500/40 bg-background/70 px-1.5 py-0 text-[10px] text-amber-700 dark:text-amber-300"
+                  >
+                    needs-input
+                  </Badge>
+                  <p className="text-sm font-medium leading-snug">
+                    {gateStatus.question}
+                  </p>
+                </div>
+              </div>
+              {gateStatus.options.length > 0 ? (
+                <div className="flex flex-wrap gap-2 pl-6">
+                  {gateStatus.options.map((option) => (
+                    <Button
+                      key={option}
+                      size="xs"
+                      disabled={resolvingGate || !task.session_id}
+                      onClick={() => handleResolveGate(option)}
+                    >
+                      {option}
+                    </Button>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex gap-2 pl-6">
+                  <Input
+                    value={gateResponse}
+                    onChange={(event) => setGateResponse(event.target.value)}
+                    disabled={resolvingGate || !task.session_id}
+                    className="h-8 text-xs"
+                  />
+                  <Button
+                    size="icon-sm"
+                    disabled={resolvingGate || !task.session_id || !gateResponse.trim()}
+                    onClick={() => handleResolveGate(gateResponse)}
+                    aria-label="Resolve gate"
+                  >
+                    {resolvingGate ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Send className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 

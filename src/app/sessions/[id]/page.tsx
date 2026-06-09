@@ -11,6 +11,7 @@ import { SessionVcc } from "@/components/sessions/session-vcc";
 import { ProcessIndicator } from "@/components/sessions/process-indicator";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { parseGateStatus } from "@/core/control-plane-state";
 import {
   ArrowLeft,
   Square,
@@ -66,6 +67,7 @@ export default function SessionDetailPage() {
   }
 
   const isActive = isInteractiveSessionStatus(session.status);
+  const gateStatus = parseGateStatus(session.gate_status);
   const isEnded =
     session.status === "completed" ||
     session.status === "failed" ||
@@ -88,7 +90,11 @@ export default function SessionDetailPage() {
             {session.prompt?.slice(0, 120) ?? session.id}
           </h2>
           <div className="flex items-center gap-2 mt-0.5">
-            <ProcessIndicator status={session.status} />
+            <ProcessIndicator
+              status={session.status}
+              currentStage={session.current_stage}
+              gateStatus={gateStatus}
+            />
             <span className="text-[10px] text-muted-foreground">
               AI task run
             </span>

@@ -5,9 +5,10 @@ import { Draggable } from "@hello-pangea/dnd";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Trash2, GitBranch, Terminal, ChevronRight, Pause, Play } from "lucide-react";
+import { Trash2, GitBranch, Terminal, ChevronRight, Pause, Play, AlertCircle, Milestone } from "lucide-react";
 import { canExecuteTaskFromCard, canPauseTaskFromCard } from "./task-card-actions";
 import { isActiveSessionStatus } from "@/core/task-readiness";
+import { parseGateStatus } from "@/core/control-plane-state";
 import type { Task, Session } from "@/core/types-dashboard";
 import { cn } from "@/core/dashboard-utils";
 import dayjs from "dayjs";
@@ -47,6 +48,8 @@ export function TaskCard({ task, index, session, onDelete, onClick, onExecute, o
   const isLive = isActiveSessionStatus(session?.status);
   const canExecute = !!onExecute && canExecuteTaskFromCard(task, session);
   const canPause = !!onPause && canPauseTaskFromCard(task, session);
+  const gateStatus = parseGateStatus(task.gate_status ?? session?.gate_status);
+  const currentStage = task.current_stage ?? session?.current_stage ?? null;
 
   return (
     <Draggable draggableId={task.id} index={index}>
@@ -113,7 +116,22 @@ export function TaskCard({ task, index, session, onDelete, onClick, onExecute, o
               {task.description}
             </p>
           )}
+          {currentStage && (
+            <div className="flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
+              <Milestone className="h-3 w-3 shrink-0 text-primary/70" />
+              <span className="truncate">{currentStage}</span>
+            </div>
+          )}
           <div className="flex items-center gap-1.5 flex-wrap">
+            {gateStatus && (
+              <Badge
+                variant="outline"
+                className="border-amber-500/40 bg-amber-500/15 px-1.5 py-0 text-[10px] text-amber-700 dark:text-amber-300"
+              >
+                <AlertCircle className="h-2.5 w-2.5" />
+                needs-input
+              </Badge>
+            )}
             <Badge
               variant="outline"
               className={cn("text-[10px] px-1.5 py-0", PRIORITY_COLORS[task.priority])}

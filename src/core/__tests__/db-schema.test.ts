@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeTestDb, insertTask } from "./test-helpers";
-import { migrateTasksV2 } from "../db";
+import { migrateControlPlaneColumns, migrateTasksV2, recoverOrphanedSessions } from "../db";
 
 test("tasks.status accepts new in_queue and fail values", () => {
   const db = makeTestDb();
@@ -29,6 +29,18 @@ test("tasks new columns exist with sensible defaults", () => {
   assert.equal(row.blocked_by, null);
   assert.equal(row.sandbox_iterations, 0);
   assert.equal(row.fail_reason, null);
+});
+
+test("tasks store control-plane stage and gate defaults", () => {
+  const db = makeTestDb();
+  const id = insertTask(db, {});
+  const row = db.prepare("SELECT current_stage, gate_status FROM tasks WHERE id = ?").get(id) as {
+    current_stage: string | null;
+    gate_status: string | null;
+  };
+
+  assert.equal(row.current_stage, null);
+  assert.equal(row.gate_status, null);
 });
 
 test("sessions store agent execution and runtime auth defaults", () => {
@@ -72,6 +84,27 @@ test("sessions store agent execution and runtime auth defaults", () => {
   assert.equal(row.agent_max_tokens, 8192);
 });
 
+test("sessions store control-plane stage and gate defaults", () => {
+  const db = makeTestDb();
+  const sessionId = "session-control-plane-defaults";
+
+  db.prepare("INSERT INTO sessions (id, project_id, status) VALUES (?, ?, ?)").run(
+    sessionId,
+    "test",
+    "running",
+  );
+
+  const row = db
+    .prepare("SELECT current_stage, gate_status FROM sessions WHERE id = ?")
+    .get(sessionId) as {
+    current_stage: string | null;
+    gate_status: string | null;
+  };
+
+  assert.equal(row.current_stage, null);
+  assert.equal(row.gate_status, null);
+});
+
 test("migrateTasksV2 preserves data and adds new columns on legacy DB", () => {
   const db = new Database(":memory:");
   // Simulate the OLD schema (pre-1.1)
@@ -97,12 +130,14 @@ test("migrateTasksV2 preserves data and adds new columns on legacy DB", () => {
   migrateTasksV2(db);
 
   // Data preserved
-  const row = db.prepare("SELECT id, title, status, blocked_by, sandbox_iterations, fail_reason FROM tasks WHERE id = 'legacy-1'").get() as any;
+  const row = db.prepare("SELECT id, title, status, blocked_by, sandbox_iterations, fail_reason, current_stage, gate_status FROM tasks WHERE id = 'legacy-1'").get() as any;
   assert.equal(row.title, "pre-existing");
   assert.equal(row.status, "in_progress");
   assert.equal(row.blocked_by, null);
   assert.equal(row.sandbox_iterations, 0);
   assert.equal(row.fail_reason, null);
+  assert.equal(row.current_stage, null);
+  assert.equal(row.gate_status, null);
 
   // New status values now allowed
   db.prepare("INSERT INTO tasks (id, title, status) VALUES ('new-1', 't', 'in_queue')").run();
@@ -117,4 +152,66 @@ test("migrateTasksV2 is idempotent", () => {
   const id = insertTask(db, { status: "fail" });
   const row = db.prepare("SELECT status FROM tasks WHERE id = ?").get(id) as any;
   assert.equal(row.status, "fail");
+});
+
+test("migrateControlPlaneColumns adds task and session gate columns on legacy DB", () => {
+  const db = new Database(":memory:");
+  db.exec(`
+    CREATE TABLE tasks (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'todo'
+    );
+    CREATE TABLE sessions (
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'running'
+    );
+    INSERT INTO tasks (id, title, status) VALUES ('legacy-task', 'legacy task', 'todo');
+    INSERT INTO sessions (id, status) VALUES ('legacy-session', 'running');
+  `);
+
+  migrateControlPlaneColumns(db);
+  migrateControlPlaneColumns(db);
+
+  const task = db
+    .prepare("SELECT current_stage, gate_status FROM tasks WHERE id = 'legacy-task'")
+    .get() as { current_stage: string | null; gate_status: string | null };
+  const session = db
+    .prepare("SELECT current_stage, gate_status FROM sessions WHERE id = 'legacy-session'")
+    .get() as { current_stage: string | null; gate_status: string | null };
+
+  assert.equal(task.current_stage, null);
+  assert.equal(task.gate_status, null);
+  assert.equal(session.current_stage, null);
+  assert.equal(session.gate_status, null);
+});
+
+test("recoverOrphanedSessions preserves paused gated sessions", () => {
+  const db = makeTestDb();
+  const gateStatus = JSON.stringify({
+    id: "gate-1",
+    question: "Continue?",
+    options: ["Continue"],
+    created_at: "2026-06-08T08:00:00.000Z",
+    stage: "2/3 approval",
+  });
+  db.prepare(
+    "INSERT INTO sessions (id, project_id, status, pid, gate_status) VALUES ('gated', 'test', 'paused', 99999999, ?)",
+  ).run(gateStatus);
+  db.prepare(
+    "INSERT INTO sessions (id, project_id, status, pid) VALUES ('orphaned', 'test', 'running', 99999999)",
+  ).run();
+
+  recoverOrphanedSessions(db);
+
+  const gated = db
+    .prepare("SELECT status, gate_status FROM sessions WHERE id = 'gated'")
+    .get() as { status: string; gate_status: string | null };
+  const orphaned = db
+    .prepare("SELECT status FROM sessions WHERE id = 'orphaned'")
+    .get() as { status: string };
+
+  assert.equal(gated.status, "paused");
+  assert.equal(gated.gate_status, gateStatus);
+  assert.equal(orphaned.status, "failed");
 });

@@ -3,6 +3,15 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Task, TaskStatus, TaskPriority, Session } from "@/core/types-dashboard";
 import type { SessionRuntimeAuthInput } from "@/core/session-runtime-auth";
+import type { ChatStreamEvent } from "@/core/stream-manager";
+
+function shouldRefreshTasksForEvent(event: ChatStreamEvent): boolean {
+  return (
+    event.type === "control_plane_stage" ||
+    event.type === "control_plane_gate" ||
+    event.type === "control_plane_gate_resolved"
+  );
+}
 
 export function useTasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -23,6 +32,25 @@ export function useTasks() {
     fetchTasks();
     const interval = setInterval(fetchTasks, 5000);
     return () => clearInterval(interval);
+  }, [fetchTasks]);
+
+  useEffect(() => {
+    const source = new EventSource("/api/devlog/stream");
+    source.onmessage = (message) => {
+      let event: ChatStreamEvent;
+      try {
+        event = JSON.parse(message.data) as ChatStreamEvent;
+      } catch {
+        return;
+      }
+      if (shouldRefreshTasksForEvent(event)) {
+        fetchTasks();
+      }
+    };
+
+    return () => {
+      source.close();
+    };
   }, [fetchTasks]);
 
   const createTask = async (data: {

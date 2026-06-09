@@ -20,7 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 const COLUMNS = getTaskBoardColumns();
 
 export function KanbanBoard() {
-  const { loading, tasksByStatus, createTask, updateTask, deleteTask, reorder, executeTask } = useTasks();
+  const { loading, tasksByStatus, createTask, updateTask, deleteTask, reorder, executeTask, refresh } = useTasks();
   const taskSessions = useTaskSessions();
   const { runtimePayload, byokReady, loaded, settingsReady } = useAgentSettings();
   const router = useRouter();
@@ -185,6 +185,7 @@ export function KanbanBoard() {
         onOpenChange={setDetailOpen}
         onUpdate={handleUpdateTask}
         onLaunchSession={handleLaunchSession}
+        onRefresh={refresh}
       />
     </div>
   );

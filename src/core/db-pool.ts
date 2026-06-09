@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { REGISTRY_SCHEMA } from "./db-schema-registry";
 import { SCHEMA } from "./db-schema";
-import { migrateTasksV2 } from "./db";
+import { migrateControlPlaneColumns, migrateTasksV2 } from "./db";
 
 export interface DbPool {
   getRegistry(): Database.Database;
@@ -49,6 +49,7 @@ export function createDbPool(opts: DbPoolOptions = {}): DbPool {
     db.pragma("foreign_keys = ON");
     db.exec(SCHEMA);
     migrateTasksV2(db);
+    migrateControlPlaneColumns(db);
     projectDbs.set(projectId, db);
     return db;
   }

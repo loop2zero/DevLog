@@ -157,3 +157,89 @@ test("sessions POST narrows arbitrary JSON before destructuring", () => {
     "sessions POST should not destructure arbitrary JSON via a blind type cast",
   );
 });
+
+test("sessions PATCH resolves gates through a dedicated action", () => {
+  const source = readRepoFile("src/app/api/sessions/[id]/route.ts");
+
+  assert.match(
+    source,
+    /action\?:[\s\S]*"resolve_gate"/,
+    "sessions PATCH action type should include resolve_gate",
+  );
+  assert.match(
+    source,
+    /case "resolve_gate":[\s\S]*processManager\.resolveGate/,
+    "resolve_gate should call processManager.resolveGate instead of sendMessage",
+  );
+  assert.doesNotMatch(
+    source,
+    /case "resolve_gate":[\s\S]*processManager\.sendMessage[\s\S]*break;/,
+    "resolve_gate must stay isolated from normal queued send messages",
+  );
+});
+
+test("process manager resolves persisted gates without the normal send queue", () => {
+  const source = readRepoFile("src/core/process-manager.ts");
+
+  assert.match(
+    source,
+    /resolveGate[\s\S]*resolveControlPlaneGate/,
+    "resolveGate should clear persisted gate state through the control-plane helper",
+  );
+  assert.match(
+    source,
+    /resolveGate[\s\S]*ensureProcess/,
+    "resolveGate should recreate a process when memory was lost after restart",
+  );
+  assert.doesNotMatch(
+    source,
+    /resolveGate[\s\S]*messageQueues\.set/,
+    "resolveGate should not enqueue approval replies behind normal messages",
+  );
+});
+
+test("kanban task surfaces render control-plane state", () => {
+  const card = readRepoFile("src/components/kanban/task-card.tsx");
+  const dialog = readRepoFile("src/components/kanban/task-detail-dialog.tsx");
+
+  assert.match(card, /parseGateStatus/, "task cards should parse persisted gate state");
+  assert.match(card, /needs-input/, "task cards should show a needs-input badge");
+  assert.match(card, /current_stage/, "task cards should render the current stage");
+
+  assert.match(dialog, /parseGateStatus/, "task detail should parse persisted gate state");
+  assert.match(dialog, /action:\s*"resolve_gate"/, "task detail replies should call resolve_gate");
+  assert.match(dialog, /gateStatus\.options\.map/, "task detail should render gate option buttons");
+});
+
+test("session surfaces render control-plane state", () => {
+  const indicator = readRepoFile("src/components/sessions/process-indicator.tsx");
+  const card = readRepoFile("src/components/sessions/session-card.tsx");
+  const detail = readRepoFile("src/app/sessions/[id]/page.tsx");
+
+  assert.match(indicator, /currentStage/, "process indicator should accept current stage text");
+  assert.match(indicator, /needs-input/, "process indicator should render needs-input");
+  assert.match(card, /parseGateStatus/, "session cards should parse gate status");
+  assert.match(card, /current_stage/, "session cards should pass current stage");
+  assert.match(detail, /gate_status/, "session detail should pass gate state to the header indicator");
+});
+
+test("task and session lists refresh on control-plane stream events", () => {
+  const tasks = readRepoFile("src/hooks/use-tasks.ts");
+  const sessions = readRepoFile("src/hooks/use-sessions.ts");
+
+  for (const [name, source] of [
+    ["use-tasks", tasks],
+    ["use-sessions", sessions],
+  ] as const) {
+    assert.match(
+      source,
+      /new EventSource\("\/api\/devlog\/stream"\)/,
+      `${name} should subscribe to the global DevLog stream`,
+    );
+    assert.match(
+      source,
+      /control_plane_stage[\s\S]*control_plane_gate[\s\S]*control_plane_gate_resolved/,
+      `${name} should react to all control-plane event types`,
+    );
+  }
+});

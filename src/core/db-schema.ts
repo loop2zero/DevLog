@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   linear_workpad_comment_id TEXT,
   linear_finalized_at TEXT,
   linear_breakdown_done_at TEXT,
+  current_stage TEXT,
+  gate_status TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   completed_at TEXT
@@ -63,6 +65,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   agent_api_version TEXT NOT NULL DEFAULT '',
   agent_base_url TEXT NOT NULL DEFAULT '${DEFAULT_API_BASE_URL}',
   agent_max_tokens INTEGER NOT NULL DEFAULT ${DEFAULT_API_MAX_TOKENS},
+  current_stage TEXT,
+  gate_status TEXT,
   prompt TEXT,
   exit_code INTEGER,
   log_path TEXT,

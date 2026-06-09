@@ -1,3 +1,5 @@
+import type { GateStatus } from "./types-dashboard";
+
 export interface ToolCall {
   name: string;
   input: Record<string, unknown>;
@@ -32,7 +34,27 @@ export type ChatStreamEvent =
   | { type: "permission_request"; tool_name: string; tool_input: Record<string, unknown>; request_id: string }
   | { type: "permission_resolved"; request_id: string; approved: boolean }
   | { type: "message_queued"; content: string; position: number }
-  | { type: "queue_drained"; remaining: number };
+  | { type: "queue_drained"; remaining: number }
+  | {
+      type: "control_plane_stage";
+      session_id: string;
+      task_id: string | null;
+      current_stage: string;
+    }
+  | {
+      type: "control_plane_gate";
+      session_id: string;
+      task_id: string | null;
+      current_stage: string | null;
+      gate_status: GateStatus;
+    }
+  | {
+      type: "control_plane_gate_resolved";
+      session_id: string;
+      task_id: string | null;
+      gate_id: string;
+      response: string;
+    };
 
 export function createSystemLogEvent({
   level,

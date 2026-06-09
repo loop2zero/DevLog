@@ -29,6 +29,8 @@ export interface Task {
   linear_identifier?: string | null;
   linear_workpad_comment_id?: string | null;
   linear_finalized_at?: string | null;
+  current_stage?: string | null;
+  gate_status?: string | null; // JSON-encoded GateStatus when a workflow is awaiting input
 }
 
 export type SessionStatus =
@@ -66,11 +68,21 @@ export interface Session {
   agent_api_version: string;
   agent_base_url: string;
   agent_max_tokens: number;
+  current_stage?: string | null;
+  gate_status?: string | null;
   prompt: string | null;
   exit_code: number | null;
   log_path: string | null;
   started_at: string;
   ended_at: string | null;
+}
+
+export interface GateStatus {
+  id: string;
+  question: string;
+  options: string[];
+  created_at: string;
+  stage?: string | null;
 }
 
 /** A structured tool call from Claude's response */

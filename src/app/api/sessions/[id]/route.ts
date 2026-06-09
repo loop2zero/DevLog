@@ -26,9 +26,10 @@ export async function PATCH(
 ) {
   const { id } = await params;
   const body = await req.json();
-  const { action, message, approved, reason } = body as {
-    action?: "send" | "kill" | "pause" | "end" | "respond_permission";
+  const { action, message, response, approved, reason } = body as {
+    action?: "send" | "kill" | "pause" | "end" | "respond_permission" | "resolve_gate";
     message?: string;
+    response?: string;
     approved?: boolean;
     reason?: string;
   };
@@ -59,6 +60,18 @@ export async function PATCH(
       }
       processManager.respondToPermission(id, approved, reason);
       break;
+
+    case "resolve_gate": {
+      const gateResponse = response ?? message;
+      if (!gateResponse?.trim()) {
+        return NextResponse.json({ error: "response is required" }, { status: 400 });
+      }
+      const result = processManager.resolveGate(id, gateResponse.trim());
+      if (!result.ok) {
+        return NextResponse.json({ error: result.error }, { status: 409 });
+      }
+      break;
+    }
 
     case "kill":
       processManager.kill(id);
