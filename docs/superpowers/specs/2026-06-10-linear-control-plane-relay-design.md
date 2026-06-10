@@ -72,3 +72,18 @@ Three sub-steps per tick, all scoped to linked, non-finalized tasks of the watch
 
 - Codex gate-response delivery in core (upstream issue, like #37).
 - Gate timeout / reminders; multi-gate concurrency beyond core's single `gate_status` column; dedicated needs-input Linear workflow state.
+
+## 9. Post-review amendments (ship 5.0)
+
+Five hardening fixes applied after dual-review:
+
+1. **Watchdog unattended propagation** (`process-manager.ts`): `SessionProcess` now carries `unattended: boolean`; watchdog captures it before deleting the entry and threads it as `runtimeAuthInput` in the requeued message — respawned watch sessions retain `--dangerously-skip-permissions`.
+2. **Comment sort order** (`relay.ts` `pollGateReplies`): `fetchComments` result is sorted ascending by `createdAt` before `find` — "first human reply" is now chronological regardless of API array order.
+3. **Query window** (`client.ts` `Q_COMMENTS`): changed `comments(first:50)` to `comments(last:50)` — gate comments and replies are always recent; the last page is the correct window.
+4. **Supersede stale gate** (`relay.ts` `relayGates`): when core overwrites `gate_status` with a new gate id while a previous gate comment is still pending, a "resolved elsewhere" receipt is posted for the old gate before the new gate comment is created — closes the old thread visually.
+5. **Self-heal deleted/out-of-window gate comment** (`relay.ts` `pollGateReplies`): if the stored `linear_gate_comment_id` is not found in fetched comments (deleted or scrolled past `last:50`), the gate comment is reposted, registered, and the DB column updated — the reply window resets to the new comment on the next tick.
+
+**Accepted limitations (not fixed here):**
+
+- (a) `resolveGate` may return `ok` even when delivery to the agent process fails (upstream core gap; finalize path backstops with BLOCKED — tracked upstream).
+- (b) Receipt comments are at-least-once; a crash between "receipt posted" and "DB column cleared" can mislabel a Linear-resolved gate as "resolved elsewhere" on the next tick (cosmetic — no duplicate resolve, no lost reply).

@@ -163,7 +163,11 @@ test("relayGates posts a NEW comment when core overwrote the gate with a new id"
   const g2 = JSON.stringify({ id: "g2", question: "Second question?", options: [], created_at: "t1", stage: null });
   db.prepare("UPDATE tasks SET gate_status = ? WHERE id='t1'").run(g2);
   await relayGates(deps);
-  assert.equal(deps.creates.length, 2);
+  // Fix C: a supersede receipt is posted for the old gate before the new gate comment,
+  // so there are 3 creates: cm-1 (g1 gate), cm-2 (supersede receipt), cm-3 (g2 gate).
+  assert.equal(deps.creates.length, 3);
+  assert.match(deps.creates[1], /resolved elsewhere/); // supersede receipt
+  assert.match(deps.creates[2], /\[g2\]/);             // new gate
   const row: any = db.prepare("SELECT linear_gate_id FROM tasks WHERE id='t1'").get();
   assert.equal(row.linear_gate_id, "g2");
 });
@@ -255,4 +259,81 @@ test("pollGateReplies treats a resolveGate failure as resolved-elsewhere", async
   await pollGateReplies(deps);
   assert.equal(deps.creates.length, 1);
   assert.match(deps.creates[0], /resolved elsewhere/);
+});
+
+// Fix A: sorted reply selection — comments returned newest-first, two human replies
+// after the gate, should resolve against the EARLIEST one (02:00 "2" = "Revise").
+test("pollGateReplies picks the earliest human reply even when API returns newest-first", async () => {
+  const db = makeTestDb();
+  const { sid } = seedPendingGate(db);
+  const resolved: any[] = [];
+  const deps = makeRelayDeps(db, {
+    resolveGate: (s: string, r: string) => { resolved.push([s, r]); return { ok: true as const }; },
+  });
+  // API returns newest-first: 03:00 "free text", then 02:00 "2" (="Revise"), gate comment last
+  (deps.client as any).fetchComments = async () => [
+    { id: "cm-human-b", body: "free text", createdAt: "2026-06-10T03:00:00.000Z" },
+    { id: "cm-human-a", body: "2", createdAt: "2026-06-10T02:00:00.000Z" },
+    GATE_COMMENT, // createdAt: 01:00
+  ];
+  await pollGateReplies(deps);
+  // After sorting ascending: gate(01:00) < cm-human-a(02:00) < cm-human-b(03:00)
+  // First reply after gate is cm-human-a "2" → "Revise"
+  assert.deepEqual(resolved, [[sid, "Revise"]]);
+});
+
+// Fix C: supersede stale gate comment when core overwrites gate_status with a new id.
+test("relayGates posts a supersede receipt for the old gate before posting the new gate", async () => {
+  const db = makeTestDb();
+  // Start with g1 already relayed and a pending gate comment
+  seedLinked(db, { gate: GATE_G1 });
+  const deps = makeRelayDeps(db);
+  await relayGates(deps);
+  // Now core overwrites with g2, old gate comment (cm-1) is still pending
+  const g2 = JSON.stringify({ id: "g2", question: "New question?", options: [], created_at: "t1", stage: null });
+  db.prepare("UPDATE tasks SET gate_status = ? WHERE id='t1'").run(g2);
+  await relayGates(deps);
+  // Should have: cm-1 (g1 gate), cm-2 (supersede receipt for g1), cm-3 (g2 gate)
+  assert.equal(deps.creates.length, 3);
+  assert.match(deps.creates[1], /resolved elsewhere/); // supersede receipt for g1
+  assert.match(deps.creates[2], /\[g2\]/);             // new gate for g2
+  const row: any = db.prepare("SELECT linear_gate_id, linear_gate_comment_id FROM tasks WHERE id='t1'").get();
+  assert.equal(row.linear_gate_id, "g2");
+  assert.equal(row.linear_gate_comment_id, "cm-3");
+});
+
+// Fix D: self-heal when gate comment is missing from fetchComments result.
+test("pollGateReplies reposts the gate comment when it is not found in fetched comments", async () => {
+  const db = makeTestDb();
+  seedPendingGate(db);
+  const resolved: any[] = [];
+  const deps = makeRelayDeps(db, {
+    resolveGate: (s: string, r: string) => { resolved.push([s, r]); return { ok: true as const }; },
+  });
+
+  // Tick 1: gate comment cm-gate is absent — only an unrelated human comment is returned.
+  (deps.client as any).fetchComments = async () => [
+    { id: "cm-unrelated", body: "some note", createdAt: "2026-06-10T00:30:00.000Z" },
+  ];
+  await pollGateReplies(deps);
+  // Should repost the gate comment (one create), no resolve call.
+  assert.equal(deps.creates.length, 1);
+  assert.match(deps.creates[0], /\[g1\]/);
+  assert.equal(resolved.length, 0);
+  // DB should now have the new gate comment id.
+  const row: any = db.prepare("SELECT linear_gate_comment_id FROM tasks WHERE id='t1'").get();
+  const newGateCmId = row.linear_gate_comment_id;
+  assert.ok(newGateCmId);
+  assert.notEqual(newGateCmId, "cm-gate");
+
+  // Tick 2: fetchComments now returns the newly posted gate comment + a human reply.
+  const T1 = "2026-06-10T02:00:00.000Z";
+  (deps.client as any).fetchComments = async () => [
+    { id: newGateCmId, body: "gate body", createdAt: "2026-06-10T01:30:00.000Z" },
+    { id: "cm-reply", body: "Approve", createdAt: T1 },
+  ];
+  await pollGateReplies(deps);
+  assert.equal(resolved.length, 1);
+  assert.equal(resolved[0][1], "Approve");
+  assert.equal(deps.creates.length, 2); // repost + receipt
 });

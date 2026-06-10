@@ -22,7 +22,7 @@ test("fetchComments returns id/body/createdAt for an issue", async () => {
   const comments = await client.fetchComments("issue-1");
   assert.equal(comments.length, 2);
   assert.deepEqual(comments[1], { id: "cm2", body: "Approve", createdAt: "2026-06-10T02:00:00.000Z" });
-  assert.match(calls[0].query, /comments/);
+  assert.match(calls[0].query, /last:50/);
   assert.equal(calls[0].variables.id, "issue-1");
 });
 

@@ -28,7 +28,7 @@ const M_COMMENT_UPD = `mutation($id:String!,$body:String!){ commentUpdate(id:$id
 const M_ISSUE_CREATE = `mutation($input:IssueCreateInput!){ issueCreate(input:$input){ success issue{ id identifier } } }`;
 const M_RELATION = `mutation($input:IssueRelationCreateInput!){ issueRelationCreate(input:$input){ success } }`;
 const M_ISSUE_BODY = `mutation($id:String!,$desc:String!){ issueUpdate(id:$id, input:{description:$desc}){ success } }`;
-const Q_COMMENTS = `query($id:String!){ issue(id:$id){ comments(first:50){ nodes{ id body createdAt } } } }`;
+const Q_COMMENTS = `query($id:String!){ issue(id:$id){ comments(last:50){ nodes{ id body createdAt } } } }`;
 
 export class LinearClient implements LinearClientI {
   constructor(private key: string, private fetchFn: FetchFn = fetch) {}

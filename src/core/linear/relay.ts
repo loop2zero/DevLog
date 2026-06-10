@@ -123,6 +123,13 @@ export async function relayGates(deps: RelayDeps): Promise<void> {
     const gate = parseGateStatus(row.gate);
     if (!gate || gate.id === row.relayedGateId) continue;
     try {
+      // Fix C: if a previous gate comment is pending (never settled) and the core
+      // overwrote gate_status with a new gate id, post a supersede receipt so the
+      // old comment thread is visually closed before we open a new one.
+      if (row.gateCommentId) {
+        const supersededId = await deps.client.createComment(row.iid, buildGateReceiptBody(row.relayedGateId ?? "?", "", "elsewhere"));
+        registerRelayComment(deps.db, supersededId, row.iid, "receipt");
+      }
       const commentId = await deps.client.createComment(row.iid, buildGateCommentBody(gate));
       // Registry BEFORE the tasks stamp: if we crash between the two, the orphaned
       // comment id is still recognized as relay-owned on later ticks (never mistaken
@@ -176,9 +183,23 @@ export async function pollGateReplies(deps: RelayDeps): Promise<void> {
       const gate = parseGateStatus(row.gate);
       if (!gate) continue;
 
-      const comments = await deps.client.fetchComments(row.iid);
+      // Fix A: sort ascending so "first reply" is chronological regardless of API order.
+      const comments = [...await deps.client.fetchComments(row.iid)].sort(
+        (a, b) => a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0,
+      );
       const gateComment = comments.find((c) => c.id === row.gateCommentId);
-      if (!gateComment) continue;
+      // Fix D: if the gate comment was deleted or has scrolled out of the query window,
+      // repost it and update the DB column so the next tick can pick up replies against
+      // the fresh comment. Skip further processing this tick — the reply window is now
+      // relative to the new comment's createdAt.
+      if (!gateComment) {
+        const repostedId = await deps.client.createComment(row.iid, buildGateCommentBody(gate));
+        registerRelayComment(deps.db, repostedId, row.iid, "gate");
+        deps.db.prepare(
+          "UPDATE tasks SET linear_gate_comment_id = ?, updated_at = datetime('now') WHERE id = ?",
+        ).run(repostedId, row.tid);
+        continue;
+      }
       const reply = comments.find(
         (c) => c.createdAt > gateComment.createdAt && !isRelayComment(deps.db, c.id) && c.body.trim() !== "",
       );
