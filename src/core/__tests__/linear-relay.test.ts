@@ -7,7 +7,10 @@ import {
   buildGateReceiptBody,
   registerRelayComment,
   isRelayComment,
+  relayStages,
+  type RelayDeps,
 } from "../linear/relay";
+import { normalizeWatchConfig } from "../linear/types";
 
 const OPTS = ["Approve", "Revise plan"];
 
@@ -51,4 +54,79 @@ test("registry: registerRelayComment is idempotent and isRelayComment discrimina
   registerRelayComment(db, "cm1", "i1", "gate");
   assert.equal(isRelayComment(db, "cm1"), true);
   assert.equal(isRelayComment(db, "cm-human"), false);
+});
+
+function seedLinked(db: any, opts: { taskId?: string; issue?: string; stage?: string | null; relayed?: string | null; gate?: string | null } = {}) {
+  const taskId = opts.taskId ?? "t1";
+  const sid = `s-${taskId}`;
+  db.prepare(
+    `INSERT INTO sessions (id, project_id, status, branch_name, worktree_path, local_cli_agent_id)
+     VALUES (?, 'repo1', 'running', 'feat/x', '/tmp/wt', 'claude')`,
+  ).run(sid);
+  db.prepare(
+    `INSERT INTO tasks (id, project_id, title, status, session_id, linear_issue_id, linear_workpad_comment_id, current_stage, linear_relayed_stage, gate_status, created_at, updated_at)
+     VALUES (?, 'repo1', 'x', 'in_progress', ?, ?, 'wp-comment', ?, ?, ?, datetime('now'), datetime('now'))`,
+  ).run(taskId, sid, opts.issue ?? "iss1", opts.stage ?? null, opts.relayed ?? null, opts.gate ?? null);
+  return { taskId, sid };
+}
+
+function makeRelayDeps(db: any, over: Partial<RelayDeps> = {}): RelayDeps & { updates: any[]; creates: any[] } {
+  const updates: any[] = [];
+  const creates: any[] = [];
+  return {
+    db,
+    w: normalizeWatchConfig({ projectSlugId: "p", devlogProjectId: "repo1" }),
+    client: {
+      updateComment: async (id: string, body: string) => { updates.push([id, body]); },
+      createComment: async (_issueId: string, body: string) => { creates.push(body); return `cm-${creates.length}`; },
+      fetchComments: async () => [],
+    },
+    resolveGate: () => ({ ok: true as const }),
+    readWorkpadFile: async () => "narrative from file",
+    updates,
+    creates,
+    ...over,
+  } as any;
+}
+
+test("relayStages refreshes the workpad once when stage changed, then stamps", async () => {
+  const db = makeTestDb();
+  seedLinked(db, { stage: "3/7 · tests", relayed: null });
+  const deps = makeRelayDeps(db);
+  await relayStages(deps);
+  assert.equal(deps.updates.length, 1);
+  assert.equal(deps.updates[0][0], "wp-comment");
+  assert.match(deps.updates[0][1], /- stage: 3\/7 · tests/);
+  assert.match(deps.updates[0][1], /narrative from file/);
+  const row: any = db.prepare("SELECT linear_relayed_stage FROM tasks WHERE id='t1'").get();
+  assert.equal(row.linear_relayed_stage, "3/7 · tests");
+  await relayStages(deps);
+  assert.equal(deps.updates.length, 1);
+});
+
+test("relayStages shows AWAITING INPUT while a gate is pending", async () => {
+  const db = makeTestDb();
+  const gate = JSON.stringify({ id: "g1", question: "ok?", options: [], created_at: "t", stage: null });
+  seedLinked(db, { stage: "2/4", gate });
+  const deps = makeRelayDeps(db);
+  await relayStages(deps);
+  assert.match(deps.updates[0][1], /AWAITING INPUT/);
+});
+
+test("relayStages tolerates a failing workpad file read", async () => {
+  const db = makeTestDb();
+  seedLinked(db, { stage: "1/2" });
+  const deps = makeRelayDeps(db, { readWorkpadFile: async () => { throw new Error("no file"); } });
+  await relayStages(deps);
+  assert.equal((deps as any).updates.length, 1);
+});
+
+test("relayStages skips finalized and stage-null rows", async () => {
+  const db = makeTestDb();
+  seedLinked(db, { taskId: "t-null", stage: null });
+  const { taskId } = seedLinked(db, { taskId: "t-fin", issue: "iss2", stage: "9/9" });
+  db.prepare("UPDATE tasks SET linear_finalized_at = datetime('now') WHERE id = ?").run(taskId);
+  const deps = makeRelayDeps(db);
+  await relayStages(deps);
+  assert.equal((deps as any).updates.length, 0);
 });

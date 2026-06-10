@@ -1,5 +1,10 @@
 import type Database from "better-sqlite3";
+import { readFile } from "fs/promises";
+import { hostname } from "os";
 import type { GateStatus } from "../types-dashboard";
+import type { LinearClientI } from "./client";
+import type { EngineId, LinearWatchConfig } from "./types";
+import { assembleWorkpad } from "./state-map";
 
 export function normalizeGateReply(body: string, options: string[]): string {
   const trimmed = body.trim();
@@ -38,4 +43,73 @@ export function registerRelayComment(db: Database.Database, commentId: string, i
 
 export function isRelayComment(db: Database.Database, commentId: string): boolean {
   return !!db.prepare("SELECT 1 FROM linear_relay_comments WHERE comment_id = ?").get(commentId);
+}
+
+export interface RelayDeps {
+  db: Database.Database;
+  client: Pick<LinearClientI, "createComment" | "updateComment" | "fetchComments">;
+  w: LinearWatchConfig;
+  resolveGate: (sessionId: string, response: string) => { ok: true } | { ok: false; error: string };
+  /** Injectable for tests; defaults to reading <worktree>/.devlog/workpad.md */
+  readWorkpadFile?: (worktreePath: string) => Promise<string>;
+}
+
+interface RelayRow {
+  tid: string;
+  sid: string;
+  iid: string;
+  cid: string | null;
+  stage: string | null;
+  relayed: string | null;
+  gate: string | null;
+  gateCommentId: string | null;
+  relayedGateId: string | null;
+  branch: string | null;
+  wp: string | null;
+  engine: string | null;
+}
+
+const Q_ROWS = `
+  SELECT t.id AS tid, t.session_id AS sid, t.linear_issue_id AS iid, t.linear_workpad_comment_id AS cid,
+         t.current_stage AS stage, t.linear_relayed_stage AS relayed, t.gate_status AS gate,
+         t.linear_gate_comment_id AS gateCommentId, t.linear_gate_id AS relayedGateId,
+         s.branch_name AS branch, s.worktree_path AS wp, s.local_cli_agent_id AS engine
+  FROM tasks t JOIN sessions s ON s.id = t.session_id
+  WHERE t.project_id = ? AND t.linear_issue_id IS NOT NULL AND t.linear_finalized_at IS NULL`;
+
+function relayRows(db: Database.Database, w: LinearWatchConfig): RelayRow[] {
+  return db.prepare(Q_ROWS).all(w.devlogProjectId) as RelayRow[];
+}
+
+async function renderWorkpad(deps: RelayDeps, row: RelayRow): Promise<string> {
+  const read = deps.readWorkpadFile ?? ((wp: string) => readFile(`${wp}/.devlog/workpad.md`, "utf-8"));
+  let agentBody: string | null = null;
+  try {
+    agentBody = row.wp ? await read(row.wp) : null;
+  } catch {
+    agentBody = null;
+  }
+  const state = row.gate ? "In Progress — AWAITING INPUT" : "In Progress";
+  return assembleWorkpad({
+    engine: (row.engine as EngineId) ?? "claude",
+    branch: row.branch ?? "?",
+    state,
+    stage: row.stage,
+    stamp: `${hostname()}:${row.wp ?? "?"}@run`,
+    agentBody,
+  });
+}
+
+export async function relayStages(deps: RelayDeps): Promise<void> {
+  const rows = relayRows(deps.db, deps.w).filter(
+    (r) => r.cid && r.stage != null && r.stage !== r.relayed,
+  );
+  for (const row of rows) {
+    try {
+      await deps.client.updateComment(row.cid!, await renderWorkpad(deps, row));
+      deps.db.prepare("UPDATE tasks SET linear_relayed_stage = ?, updated_at = datetime('now') WHERE id = ?").run(row.stage, row.tid);
+    } catch (e) {
+      console.error("[linear relay] stage row failed", row.iid, e);
+    }
+  }
 }
