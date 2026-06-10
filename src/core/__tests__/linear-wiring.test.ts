@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildEnvStamp, resolveStateIds, isBreakdownIssue } from "../linear/wiring";
+import { buildEnvStamp, resolveStateIds, isBreakdownIssue, buildRelayResolveGate } from "../linear/wiring";
 import { normalizeWatchConfig } from "../linear/types";
 
 test("buildEnvStamp formats host:path@sha", () => {
@@ -36,4 +36,13 @@ test("isBreakdownIssue matches the configured breakdown label case-insensitively
   const w = normalizeWatchConfig({ projectSlugId: "p", devlogProjectId: "r" });
   assert.equal(isBreakdownIssue({ labels: ["Design-Breakdown"] } as any, w), true);
   assert.equal(isBreakdownIssue({ labels: ["claude"] } as any, w), false);
+});
+
+test("buildRelayResolveGate forwards unattended:true so a gate-resume respawn keeps permissions", () => {
+  const calls: any[] = [];
+  const fake = { resolveGate: (sid: string, resp: string, auth?: { unattended?: boolean }) => { calls.push([sid, resp, auth]); return { ok: true as const }; } };
+  const fn = buildRelayResolveGate(fake);
+  const r = fn("sess-1", "Approve");
+  assert.deepEqual(r, { ok: true });
+  assert.deepEqual(calls, [["sess-1", "Approve", { unattended: true }]]);
 });

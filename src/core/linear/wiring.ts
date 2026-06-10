@@ -22,6 +22,14 @@ export function buildEnvStamp(host: string, path: string, sha: string): string {
   return `${host}:${path}@${sha}`;
 }
 
+export function buildRelayResolveGate(
+  pm: { resolveGate: (sid: string, resp: string, auth?: { unattended?: boolean }) => { ok: true } | { ok: false; error: string } } = processManager,
+): (sid: string, resp: string) => { ok: true } | { ok: false; error: string } {
+  // Watch-dispatched sessions are always unattended (buildEngineExecuteInput sets it),
+  // but `unattended` is transient and lost on a gate-resume respawn unless re-supplied here.
+  return (sid, resp) => pm.resolveGate(sid, resp, { unattended: true });
+}
+
 export async function resolveStateIds(
   client: Pick<LinearClientI, "fetchWorkflowStates">,
   w: LinearWatchConfig,
@@ -101,7 +109,7 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
           db,
           client,
           w,
-          resolveGate: (sid, resp) => processManager.resolveGate(sid, resp),
+          resolveGate: buildRelayResolveGate(),
         });
       },
       onDispatch: async (issue) => {

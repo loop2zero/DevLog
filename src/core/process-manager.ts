@@ -1232,6 +1232,7 @@ class ProcessManager {
   resolveGate(
     sessionId: string,
     response: string,
+    runtimeAuthInput?: SessionRuntimeAuthInput,
   ): { ok: true } | { ok: false; error: string } {
     const trimmed = response.trim();
     if (!trimmed) {
@@ -1258,7 +1259,7 @@ class ProcessManager {
 
     let sp = this.sessions.get(sessionId);
     if (!sp || sp.proc.killed) {
-      sp = this.ensureProcess(sessionId) ?? undefined;
+      sp = this.ensureProcess(sessionId, runtimeAuthInput) ?? undefined;
     }
 
     if (sp && !sp.proc.killed) {
