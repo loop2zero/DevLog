@@ -14,6 +14,7 @@ export interface LinearClientI {
   updateIssueBody(issueId: string, body: string): Promise<void>;
   fetchChildIssues(parentId: string): Promise<Array<{ id: string; identifier: string; title: string; stateName: string }>>;
   fetchTeamAndLabels(projectSlugId: string): Promise<{ teamId: string; projectId: string; labels: Record<string, string> }>;
+  fetchComments(issueId: string): Promise<Array<{ id: string; body: string; createdAt: string }>>;
 }
 
 const Q_TRIGGER = `query($slug:String!,$state:String!){ issues(filter:{project:{slugId:{eq:$slug}}, state:{name:{eq:$state}}}, first:25){ nodes{ id identifier title description state{name} labels{ nodes{ name } } } } }`;
@@ -27,6 +28,7 @@ const M_COMMENT_UPD = `mutation($id:String!,$body:String!){ commentUpdate(id:$id
 const M_ISSUE_CREATE = `mutation($input:IssueCreateInput!){ issueCreate(input:$input){ success issue{ id identifier } } }`;
 const M_RELATION = `mutation($input:IssueRelationCreateInput!){ issueRelationCreate(input:$input){ success } }`;
 const M_ISSUE_BODY = `mutation($id:String!,$desc:String!){ issueUpdate(id:$id, input:{description:$desc}){ success } }`;
+const Q_COMMENTS = `query($id:String!){ issue(id:$id){ comments(first:50){ nodes{ id body createdAt } } } }`;
 
 export class LinearClient implements LinearClientI {
   constructor(private key: string, private fetchFn: FetchFn = fetch) {}
@@ -100,6 +102,11 @@ export class LinearClient implements LinearClientI {
   async fetchChildIssues(parentId: string): Promise<Array<{ id: string; identifier: string; title: string; stateName: string }>> {
     const d = await this.gql<{ issue: { children: { nodes: any[] } } | null }>(Q_CHILDREN, { id: parentId });
     return (d.issue?.children.nodes ?? []).map((n) => ({ id: n.id, identifier: n.identifier, title: n.title, stateName: n.state.name }));
+  }
+
+  async fetchComments(issueId: string): Promise<Array<{ id: string; body: string; createdAt: string }>> {
+    const d = await this.gql<{ issue: { comments: { nodes: Array<{ id: string; body: string; createdAt: string }> } } | null }>(Q_COMMENTS, { id: issueId });
+    return d.issue?.comments.nodes ?? [];
   }
 
   async fetchTeamAndLabels(projectSlugId: string): Promise<{ teamId: string; projectId: string; labels: Record<string, string> }> {
