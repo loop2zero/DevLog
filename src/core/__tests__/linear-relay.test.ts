@@ -8,6 +8,7 @@ import {
   registerRelayComment,
   isRelayComment,
   relayStages,
+  relayGates,
   type RelayDeps,
 } from "../linear/relay";
 import { normalizeWatchConfig } from "../linear/types";
@@ -129,4 +130,44 @@ test("relayStages skips finalized and stage-null rows", async () => {
   const deps = makeRelayDeps(db);
   await relayStages(deps);
   assert.equal((deps as any).updates.length, 0);
+});
+
+const GATE_G1 = JSON.stringify({ id: "g1", question: "Approve the plan?", options: ["Approve", "Revise"], created_at: "t0", stage: "2/4" });
+
+test("relayGates posts exactly one gate comment per gate id and records it", async () => {
+  const db = makeTestDb();
+  seedLinked(db, { gate: GATE_G1, stage: "2/4" });
+  const deps = makeRelayDeps(db);
+  await relayGates(deps);
+  assert.equal(deps.creates.length, 1);
+  assert.match(deps.creates[0], /\[g1\]/);
+  assert.match(deps.creates[0], /1\. Approve/);
+  const row: any = db.prepare("SELECT linear_gate_comment_id, linear_gate_id FROM tasks WHERE id='t1'").get();
+  assert.equal(row.linear_gate_comment_id, "cm-1");
+  assert.equal(row.linear_gate_id, "g1");
+  const reg: any = db.prepare("SELECT kind FROM linear_relay_comments WHERE comment_id='cm-1'").get();
+  assert.equal(reg.kind, "gate");
+  await relayGates(deps);
+  assert.equal(deps.creates.length, 1);
+});
+
+test("relayGates posts a NEW comment when core overwrote the gate with a new id", async () => {
+  const db = makeTestDb();
+  seedLinked(db, { gate: GATE_G1 });
+  const deps = makeRelayDeps(db);
+  await relayGates(deps);
+  const g2 = JSON.stringify({ id: "g2", question: "Second question?", options: [], created_at: "t1", stage: null });
+  db.prepare("UPDATE tasks SET gate_status = ? WHERE id='t1'").run(g2);
+  await relayGates(deps);
+  assert.equal(deps.creates.length, 2);
+  const row: any = db.prepare("SELECT linear_gate_id FROM tasks WHERE id='t1'").get();
+  assert.equal(row.linear_gate_id, "g2");
+});
+
+test("relayGates skips rows with unparseable gate_status", async () => {
+  const db = makeTestDb();
+  seedLinked(db, { gate: "not-json" });
+  const deps = makeRelayDeps(db);
+  await relayGates(deps);
+  assert.equal(deps.creates.length, 0);
 });

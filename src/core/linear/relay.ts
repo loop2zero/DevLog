@@ -5,6 +5,7 @@ import type { GateStatus } from "../types-dashboard";
 import type { LinearClientI } from "./client";
 import type { EngineId, LinearWatchConfig } from "./types";
 import { assembleWorkpad } from "./state-map";
+import { parseGateStatus } from "../control-plane-state";
 
 export function normalizeGateReply(body: string, options: string[]): string {
   const trimmed = body.trim();
@@ -110,6 +111,30 @@ export async function relayStages(deps: RelayDeps): Promise<void> {
       deps.db.prepare("UPDATE tasks SET linear_relayed_stage = ?, updated_at = datetime('now') WHERE id = ?").run(row.stage, row.tid);
     } catch (e) {
       console.error("[linear relay] stage row failed", row.iid, e);
+    }
+  }
+}
+
+export async function relayGates(deps: RelayDeps): Promise<void> {
+  const rows = relayRows(deps.db, deps.w).filter((r) => r.gate != null);
+  for (const row of rows) {
+    const gate = parseGateStatus(row.gate);
+    if (!gate || gate.id === row.relayedGateId) continue;
+    try {
+      const commentId = await deps.client.createComment(row.iid, buildGateCommentBody(gate));
+      registerRelayComment(deps.db, commentId, row.iid, "gate");
+      deps.db.prepare(
+        "UPDATE tasks SET linear_gate_comment_id = ?, linear_gate_id = ?, updated_at = datetime('now') WHERE id = ?",
+      ).run(commentId, gate.id, row.tid);
+      if (row.cid) {
+        try {
+          await deps.client.updateComment(row.cid, await renderWorkpad(deps, row));
+        } catch {
+          /* workpad refresh is best-effort */
+        }
+      }
+    } catch (e) {
+      console.error("[linear relay] gate row failed", row.iid, e);
     }
   }
 }
