@@ -158,6 +158,10 @@ interface SessionProcess {
   genericStreamState: GenericStreamState;
   isProcessing: boolean;
   paused: boolean;
+  /** Whether this session was spawned with --dangerously-skip-permissions. Captured at
+   *  spawn time so the watchdog can requeue the message with the same unattended flag
+   *  and preserve permission-skip semantics across watchdog restarts. */
+  unattended: boolean;
   lastActivityAt: number;
   textBuffer: string;
   toolCalls: ToolCall[];
@@ -611,6 +615,10 @@ class ProcessManager {
       } catch {
         // ignore
       }
+      // Capture unattended flag BEFORE deleting the session entry so we can
+      // thread it through requeueLastUserMessage → ensureProcess and preserve
+      // --dangerously-skip-permissions on the respawned process.
+      const wasUnattended = sp.unattended;
       this.sessions.delete(sessionId);
 
       try {
@@ -623,7 +631,7 @@ class ProcessManager {
       }
 
       if (sp.isProcessing) {
-        this.requeueLastUserMessage(sessionId);
+        this.requeueLastUserMessage(sessionId, wasUnattended);
       }
     }
   }
@@ -640,7 +648,7 @@ class ProcessManager {
     }
   }
 
-  private requeueLastUserMessage(sessionId: string): void {
+  private requeueLastUserMessage(sessionId: string, unattended = false): void {
     try {
       const db = getDb();
       const row = db
@@ -652,7 +660,10 @@ class ProcessManager {
       if (!row?.content) return;
 
       const queue = this.messageQueues.get(sessionId) ?? [];
-      queue.unshift({ message: row.content });
+      queue.unshift({
+        message: row.content,
+        runtimeAuthInput: unattended ? { unattended: true } : undefined,
+      });
       this.messageQueues.set(sessionId, queue);
     } catch {
       // ignore
@@ -805,6 +816,7 @@ class ProcessManager {
       },
       isProcessing: false,
       paused: false,
+      unattended: runtimeAuthConfig.unattended === true,
       lastActivityAt: Date.now(),
       textBuffer: "",
       toolCalls: [],
