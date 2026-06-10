@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   linear_workpad_comment_id TEXT,
   linear_finalized_at TEXT,
   linear_breakdown_done_at TEXT,
+  linear_relayed_stage TEXT,
+  linear_gate_comment_id TEXT,
+  linear_gate_id TEXT,
   current_stage TEXT,
   gate_status TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -124,6 +127,13 @@ CREATE TABLE IF NOT EXISTS linear_breakdown_subs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_breakdown_subs_parent ON linear_breakdown_subs(parent_issue_id, position);
+
+CREATE TABLE IF NOT EXISTS linear_relay_comments (
+  comment_id TEXT PRIMARY KEY,
+  issue_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 CREATE VIEW IF NOT EXISTS active_conflicts AS
 SELECT

@@ -29,6 +29,9 @@ export interface Task {
   linear_identifier?: string | null;
   linear_workpad_comment_id?: string | null;
   linear_finalized_at?: string | null;
+  linear_relayed_stage?: string | null;
+  linear_gate_comment_id?: string | null;
+  linear_gate_id?: string | null;
   current_stage?: string | null;
   gate_status?: string | null; // JSON-encoded GateStatus when a workflow is awaiting input
 }
