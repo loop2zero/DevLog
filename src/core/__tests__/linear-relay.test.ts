@@ -143,6 +143,8 @@ test("relayGates posts exactly one gate comment per gate id and records it", asy
   assert.equal(deps.creates.length, 1);
   assert.match(deps.creates[0], /\[g1\]/);
   assert.match(deps.creates[0], /1\. Approve/);
+  assert.equal(deps.updates.length, 1);
+  assert.match(deps.updates[0][1], /AWAITING INPUT/);
   const row: any = db.prepare("SELECT linear_gate_comment_id, linear_gate_id FROM tasks WHERE id='t1'").get();
   assert.equal(row.linear_gate_comment_id, "cm-1");
   assert.equal(row.linear_gate_id, "g1");
@@ -150,6 +152,7 @@ test("relayGates posts exactly one gate comment per gate id and records it", asy
   assert.equal(reg.kind, "gate");
   await relayGates(deps);
   assert.equal(deps.creates.length, 1);
+  assert.equal(deps.updates.length, 1);
 });
 
 test("relayGates posts a NEW comment when core overwrote the gate with a new id", async () => {

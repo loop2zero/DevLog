@@ -7,6 +7,8 @@ import type { EngineId, LinearWatchConfig } from "./types";
 import { assembleWorkpad } from "./state-map";
 import { parseGateStatus } from "../control-plane-state";
 
+export type RelayCommentKind = "workpad" | "gate" | "receipt" | "breakdown-failure";
+
 export function normalizeGateReply(body: string, options: string[]): string {
   const trimmed = body.trim();
   if (/^\d+$/.test(trimmed)) {
@@ -38,7 +40,7 @@ export function buildGateReceiptBody(gateId: string, response: string, via: "lin
   return `## ✅ GATE resolved \`[${gateId}]\`\n\nReply delivered to the agent:\n\n> ${response}`;
 }
 
-export function registerRelayComment(db: Database.Database, commentId: string, issueId: string, kind: string): void {
+export function registerRelayComment(db: Database.Database, commentId: string, issueId: string, kind: RelayCommentKind): void {
   db.prepare("INSERT OR IGNORE INTO linear_relay_comments (comment_id, issue_id, kind) VALUES (?, ?, ?)").run(commentId, issueId, kind);
 }
 
@@ -122,6 +124,9 @@ export async function relayGates(deps: RelayDeps): Promise<void> {
     if (!gate || gate.id === row.relayedGateId) continue;
     try {
       const commentId = await deps.client.createComment(row.iid, buildGateCommentBody(gate));
+      // Registry BEFORE the tasks stamp: if we crash between the two, the orphaned
+      // comment id is still recognized as relay-owned on later ticks (never mistaken
+      // for a human reply); the worst case is a duplicate gate comment (at-least-once).
       registerRelayComment(deps.db, commentId, row.iid, "gate");
       deps.db.prepare(
         "UPDATE tasks SET linear_gate_comment_id = ?, linear_gate_id = ?, updated_at = datetime('now') WHERE id = ?",
