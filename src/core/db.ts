@@ -216,9 +216,10 @@ export function getDb(): Database.Database {
     recoverOrphanedSessions(_db);
   }
 
-  // FIX 5: migrateLinearColumns must run LAST — after all table-recreation migrations
-  // (tasks_new, sessions_new) — so the linear columns are never dropped by a later
-  // CREATE TABLE … tasks_new / DROP TABLE tasks sequence.
+  // FIX 5: migrateLinearColumns must run AFTER all migrations that recreate the tasks table
+  // (CREATE TABLE … tasks_new / DROP TABLE tasks), so the linear columns survive any
+  // table-recreation sequence. migrateBreakdownTable / migrateRelayCommentsTable are safe
+  // to follow because they only create their own tables and never touch tasks.
   migrateLinearColumns(_db);
   migrateBreakdownTable(_db);
   migrateRelayCommentsTable(_db);
