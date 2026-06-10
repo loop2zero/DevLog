@@ -11,12 +11,14 @@ export interface TickDeps {
   onDispatch: (issue: LinearIssue) => Promise<void>;
   finalize: () => Promise<void>;
   reconcile: () => Promise<void>;
+  relay: () => Promise<void>;
   stateIds: ResolvedStateIds;
 }
 
 export async function tick(deps: TickDeps): Promise<void> {
   await deps.finalize();
   await deps.reconcile();
+  await deps.relay();
   const issues = await deps.client.fetchTriggerIssues(deps.watch.projectSlugId, deps.watch.triggerState);
   for (const issue of issues) {
     if (alreadyLinked(deps.db, issue.id)) continue;

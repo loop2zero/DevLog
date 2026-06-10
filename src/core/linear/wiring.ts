@@ -12,6 +12,8 @@ import { executeTask } from "../task-execution";
 import { startPoller, type TickDeps } from "./poller";
 import { runBreakdown } from "./batch-create";
 import { reconcileBreakdowns } from "./reconcile";
+import { relayControlPlane, registerRelayComment } from "./relay";
+import { processManager } from "../process-manager";
 import type { EngineId, LinearIssue, LinearWatchConfig } from "./types";
 
 const execFileAsync = promisify(execFile);
@@ -94,6 +96,14 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
       reconcile: async () => {
         await reconcileBreakdowns({ db, client, w, stateIds });
       },
+      relay: async () => {
+        await relayControlPlane({
+          db,
+          client,
+          w,
+          resolveGate: (sid, resp) => processManager.resolveGate(sid, resp),
+        });
+      },
       onDispatch: async (issue) => {
         if (isBreakdownIssue(issue, w)) {
           const result = await runBreakdown({ db, client, w, parent: issue, repoRoot, stateIds, teamAndLabels });
@@ -102,7 +112,8 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
             // .devlog/breakdown.json auto-recovers without spamming the issue.
             if (!breakdownFailedComments.has(issue.id)) {
               breakdownFailedComments.add(issue.id);
-              await client.createComment(issue.id, `**Breakdown failed:** ${result.error}. Fix \`.devlog/breakdown.json\`; the watcher will retry automatically.`);
+              const failureCommentId = await client.createComment(issue.id, `**Breakdown failed:** ${result.error}. Fix \`.devlog/breakdown.json\`; the watcher will retry automatically.`);
+              registerRelayComment(db, failureCommentId, issue.id, "breakdown-failure");
             }
             return;
           }
@@ -141,6 +152,7 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
             commentId,
             issue.id,
           );
+          registerRelayComment(db, commentId, issue.id, "workpad");
         } else {
           // Launch failed — create a blocked workpad comment so the Linear issue reflects the failure.
           const stamp = buildEnvStamp(hostname(), "?", "new");
@@ -158,6 +170,7 @@ export async function startWatching(): Promise<Array<{ stop: () => void }>> {
             commentId,
             issue.id,
           );
+          registerRelayComment(db, commentId, issue.id, "workpad");
         }
       },
       finalize: async () => {
