@@ -31,3 +31,14 @@ test("isTerminal", () => {
   assert.equal(isTerminal("Done", w), true);
   assert.equal(isTerminal("In Progress", w), false);
 });
+
+test("assembleWorkpad renders a stage line when provided", () => {
+  const out = assembleWorkpad({ engine: "claude", branch: "b", state: "In Progress", stamp: "h:p@s", stage: "3/7 · running tests" });
+  assert.match(out, /- stage: 3\/7 · running tests/);
+  assert.ok(out.indexOf("- state:") < out.indexOf("- stage:"));
+});
+
+test("assembleWorkpad omits the stage line when absent", () => {
+  const out = assembleWorkpad({ engine: "claude", branch: "b", state: "In Progress", stamp: "h:p@s" });
+  assert.ok(!out.includes("- stage:"));
+});

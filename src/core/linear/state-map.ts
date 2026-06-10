@@ -18,6 +18,7 @@ export interface WorkpadParts {
   branch: string;
   state: string;
   stamp: string;
+  stage?: string | null;
   pr?: string | null;
   cost?: string | null;
   agentBody?: string | null;
@@ -30,6 +31,7 @@ export function assembleWorkpad(p: WorkpadParts): string {
     `\`${p.stamp}\``,
     "",
     `- state: ${p.state}`,
+    ...(p.stage ? [`- stage: ${p.stage}`] : []),
     `- engine: ${p.engine}`,
     `- branch: ${p.branch}`,
     ...(p.pr ? [`- PR: ${p.pr}`] : []),
