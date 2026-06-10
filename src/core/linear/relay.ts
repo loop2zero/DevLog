@@ -138,3 +138,62 @@ export async function relayGates(deps: RelayDeps): Promise<void> {
     }
   }
 }
+
+async function settleGate(
+  deps: RelayDeps,
+  row: RelayRow,
+  receipt: string,
+): Promise<void> {
+  const receiptId = await deps.client.createComment(row.iid, receipt);
+  registerRelayComment(deps.db, receiptId, row.iid, "receipt");
+  deps.db.prepare(
+    "UPDATE tasks SET linear_gate_comment_id = NULL, updated_at = datetime('now') WHERE id = ?",
+  ).run(row.tid);
+  if (row.cid) {
+    try {
+      const fresh = relayRows(deps.db, deps.w).find((r) => r.tid === row.tid);
+      if (fresh) await deps.client.updateComment(row.cid, await renderWorkpad(deps, fresh));
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
+export async function pollGateReplies(deps: RelayDeps): Promise<void> {
+  const rows = relayRows(deps.db, deps.w).filter((r) => r.gateCommentId != null);
+  for (const row of rows) {
+    try {
+      if (row.gate == null) {
+        // Resolved on another surface (e.g. DevLog web UI) — close the Linear loop.
+        await settleGate(deps, row, buildGateReceiptBody(row.relayedGateId ?? "?", "", "elsewhere"));
+        continue;
+      }
+      const gate = parseGateStatus(row.gate);
+      if (!gate) continue;
+
+      const comments = await deps.client.fetchComments(row.iid);
+      const gateComment = comments.find((c) => c.id === row.gateCommentId);
+      if (!gateComment) continue;
+      const reply = comments.find(
+        (c) => c.createdAt > gateComment.createdAt && !isRelayComment(deps.db, c.id) && c.body.trim() !== "",
+      );
+      if (!reply) continue;
+
+      const response = normalizeGateReply(reply.body, gate.options);
+      const result = deps.resolveGate(row.sid, response);
+      if (result.ok) {
+        await settleGate(deps, row, buildGateReceiptBody(gate.id, response, "linear"));
+      } else {
+        await settleGate(deps, row, buildGateReceiptBody(gate.id, "", "elsewhere"));
+      }
+    } catch (e) {
+      console.error("[linear relay] reply row failed", row.iid, e);
+    }
+  }
+}
+
+export async function relayControlPlane(deps: RelayDeps): Promise<void> {
+  await relayStages(deps);
+  await relayGates(deps);
+  await pollGateReplies(deps);
+}

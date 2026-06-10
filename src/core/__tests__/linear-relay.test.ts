@@ -9,6 +9,7 @@ import {
   isRelayComment,
   relayStages,
   relayGates,
+  pollGateReplies,
   type RelayDeps,
 } from "../linear/relay";
 import { normalizeWatchConfig } from "../linear/types";
@@ -170,4 +171,85 @@ test("relayGates skips rows with unparseable gate_status", async () => {
   const deps = makeRelayDeps(db);
   await relayGates(deps);
   assert.equal(deps.creates.length, 0);
+});
+
+function seedPendingGate(db: any) {
+  const ids = seedLinked(db, { gate: GATE_G1, stage: "2/4" });
+  db.prepare("UPDATE tasks SET linear_gate_comment_id='cm-gate', linear_gate_id='g1' WHERE id='t1'").run();
+  db.prepare("INSERT OR IGNORE INTO linear_relay_comments (comment_id, issue_id, kind) VALUES ('cm-gate','iss1','gate')").run();
+  return ids;
+}
+
+const GATE_COMMENT = { id: "cm-gate", body: "gate body", createdAt: "2026-06-10T01:00:00.000Z" };
+
+test("pollGateReplies resolves once from the first human reply and posts a receipt", async () => {
+  const db = makeTestDb();
+  const { sid } = seedPendingGate(db);
+  const resolved: any[] = [];
+  const deps = makeRelayDeps(db, {
+    resolveGate: (s: string, r: string) => { resolved.push([s, r]); return { ok: true as const }; },
+  });
+  (deps.client as any).fetchComments = async () => [
+    GATE_COMMENT,
+    { id: "cm-human", body: "2", createdAt: "2026-06-10T02:00:00.000Z" },
+  ];
+  await pollGateReplies(deps);
+  assert.deepEqual(resolved, [[sid, "Revise"]]);
+  assert.equal(deps.creates.length, 1);
+  assert.match(deps.creates[0], /✅ GATE resolved/);
+  const row: any = db.prepare("SELECT linear_gate_comment_id FROM tasks WHERE id='t1'").get();
+  assert.equal(row.linear_gate_comment_id, null);
+  const receiptRegistered: any = db.prepare("SELECT 1 FROM linear_relay_comments WHERE comment_id='cm-1'").get();
+  assert.ok(receiptRegistered);
+});
+
+test("pollGateReplies ignores watch-created comments and earlier comments", async () => {
+  const db = makeTestDb();
+  seedPendingGate(db);
+  db.prepare("INSERT INTO linear_relay_comments (comment_id, issue_id, kind) VALUES ('cm-wp','iss1','workpad')").run();
+  const resolved: any[] = [];
+  const deps = makeRelayDeps(db, {
+    resolveGate: (s: string, r: string) => { resolved.push([s, r]); return { ok: true as const }; },
+  });
+  (deps.client as any).fetchComments = async () => [
+    { id: "cm-earlier", body: "pre-gate human note", createdAt: "2026-06-10T00:30:00.000Z" },
+    GATE_COMMENT,
+    { id: "cm-wp", body: "workpad refresh", createdAt: "2026-06-10T01:30:00.000Z" },
+  ];
+  await pollGateReplies(deps);
+  assert.equal(resolved.length, 0);
+  assert.equal(deps.creates.length, 0);
+});
+
+test("pollGateReplies handles resolved-elsewhere without calling resolveGate", async () => {
+  const db = makeTestDb();
+  seedPendingGate(db);
+  db.prepare("UPDATE tasks SET gate_status = NULL WHERE id='t1'").run();
+  const resolved: any[] = [];
+  const deps = makeRelayDeps(db, {
+    resolveGate: (s: string, r: string) => { resolved.push([s, r]); return { ok: true as const }; },
+  });
+  await pollGateReplies(deps);
+  assert.equal(resolved.length, 0);
+  assert.equal(deps.creates.length, 1);
+  assert.match(deps.creates[0], /resolved elsewhere/);
+  const row: any = db.prepare("SELECT linear_gate_comment_id FROM tasks WHERE id='t1'").get();
+  assert.equal(row.linear_gate_comment_id, null);
+  await pollGateReplies(deps);
+  assert.equal(deps.creates.length, 1);
+});
+
+test("pollGateReplies treats a resolveGate failure as resolved-elsewhere", async () => {
+  const db = makeTestDb();
+  seedPendingGate(db);
+  const deps = makeRelayDeps(db, {
+    resolveGate: () => ({ ok: false as const, error: "no pending gate" }),
+  });
+  (deps.client as any).fetchComments = async () => [
+    GATE_COMMENT,
+    { id: "cm-human", body: "Approve", createdAt: "2026-06-10T02:00:00.000Z" },
+  ];
+  await pollGateReplies(deps);
+  assert.equal(deps.creates.length, 1);
+  assert.match(deps.creates[0], /resolved elsewhere/);
 });
