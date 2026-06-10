@@ -302,6 +302,29 @@ test("relayGates posts a supersede receipt for the old gate before posting the n
   assert.equal(row.linear_gate_comment_id, "cm-3");
 });
 
+test("pollGateReplies leaves the gate pending and posts nothing when delivery fails (retries next tick)", async () => {
+  const db = makeTestDb();
+  const { sid } = seedPendingGate(db);
+  const attempts: string[] = [];
+  const deps = makeRelayDeps(db, {
+    resolveGate: (s: string) => { attempts.push(s); return { ok: false as const, error: "gate reply could not be delivered; gate restored" }; },
+  });
+  (deps.client as any).fetchComments = async () => [
+    GATE_COMMENT,
+    { id: "cm-human", body: "Approve", createdAt: "2026-06-10T02:00:00.000Z" },
+  ];
+  await pollGateReplies(deps);
+  assert.equal(attempts.length, 1);
+  assert.equal(deps.creates.length, 0); // no receipt
+  const row: any = db.prepare("SELECT linear_gate_comment_id FROM tasks WHERE id='t1'").get();
+  assert.equal(row.linear_gate_comment_id, "cm-gate"); // still pending
+  // next tick retries and succeeds
+  deps.resolveGate = (_s: string, _r: string) => ({ ok: true as const });
+  await pollGateReplies(deps);
+  assert.equal(deps.creates.length, 1);
+  assert.match(deps.creates[0], /✅ GATE resolved/);
+});
+
 // Fix D: self-heal when gate comment is missing from fetchComments result.
 test("pollGateReplies reposts the gate comment when it is not found in fetched comments", async () => {
   const db = makeTestDb();

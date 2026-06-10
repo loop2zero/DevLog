@@ -209,8 +209,11 @@ export async function pollGateReplies(deps: RelayDeps): Promise<void> {
       const result = deps.resolveGate(row.sid, response);
       if (result.ok) {
         await settleGate(deps, row, buildGateReceiptBody(gate.id, response, "linear"));
-      } else {
+      } else if (result.error === "no pending gate") {
         await settleGate(deps, row, buildGateReceiptBody(gate.id, "", "elsewhere"));
+      } else {
+        // Delivery failure — gate restored in core; leave the row pending and retry next tick.
+        console.error("[linear relay] gate reply delivery failed; will retry", row.iid, result.error);
       }
     } catch (e) {
       console.error("[linear relay] reply row failed", row.iid, e);

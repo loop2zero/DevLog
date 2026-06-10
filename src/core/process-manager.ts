@@ -1251,6 +1251,16 @@ class ProcessManager {
       return { ok: false, error: "response is required" };
     }
 
+    // Acquire the process BEFORE clearing the gate so we can abort without
+    // consuming it if the process is permanently unavailable.
+    let sp = this.sessions.get(sessionId);
+    if (!sp || sp.proc.killed) {
+      sp = this.ensureProcess(sessionId, runtimeAuthInput) ?? undefined;
+    }
+    if (!sp || sp.proc.killed) {
+      return { ok: false, error: "agent process unavailable" };
+    }
+
     const db = getDb();
     const resolved = resolveControlPlaneGate(db, sessionId);
     if (!resolved) {
@@ -1269,26 +1279,30 @@ class ProcessManager {
       content: trimmed,
     });
 
-    let sp = this.sessions.get(sessionId);
-    if (!sp || sp.proc.killed) {
-      sp = this.ensureProcess(sessionId, runtimeAuthInput) ?? undefined;
+    const requestId = sp.pendingPermission?.requestId ?? resolved.gateStatus.id;
+    sp.pendingPermission = null;
+    if (sp.paused) {
+      sp.proc.kill("SIGCONT");
+      sp.paused = false;
+    }
+    sp.isProcessing = true;
+
+    const delivered = this.writeGateResponse(sp, trimmed);
+    if (!delivered) {
+      // Restore the gate so the next tick can retry delivery.
+      const serialized = JSON.stringify(resolved.gateStatus);
+      db.prepare("UPDATE sessions SET gate_status = ?, status = 'paused' WHERE id = ?").run(serialized, sessionId);
+      if (resolved.taskId) {
+        db.prepare("UPDATE tasks SET gate_status = ?, updated_at = datetime('now') WHERE id = ?").run(serialized, resolved.taskId);
+      }
+      return { ok: false, error: "gate reply could not be delivered; gate restored" };
     }
 
-    if (sp && !sp.proc.killed) {
-      const requestId = sp.pendingPermission?.requestId ?? resolved.gateStatus.id;
-      sp.pendingPermission = null;
-      if (sp.paused) {
-        sp.proc.kill("SIGCONT");
-        sp.paused = false;
-      }
-      sp.isProcessing = true;
-      this.writeGateResponse(sp, trimmed);
-      streamManager.emit(sessionId, {
-        type: "permission_resolved",
-        request_id: requestId,
-        approved: true,
-      });
-    }
+    streamManager.emit(sessionId, {
+      type: "permission_resolved",
+      request_id: requestId,
+      approved: true,
+    });
 
     db.prepare(
       "UPDATE sessions SET status = 'running' WHERE id = ? AND status = 'paused'",
@@ -1309,14 +1323,14 @@ class ProcessManager {
     return { ok: true };
   }
 
-  private writeGateResponse(sp: SessionProcess, response: string): void {
+  private writeGateResponse(sp: SessionProcess, response: string): boolean {
     if (!sp.proc.stdin || sp.proc.stdin.destroyed || sp.proc.stdin.writableEnded) {
       this.emitSystemLog(
         "warning",
         sp.sessionId,
         "Gate resolved, but agent stdin is no longer writable.",
       );
-      return;
+      return false;
     }
 
     try {
@@ -1328,15 +1342,17 @@ class ProcessManager {
           parent_tool_use_id: null,
         });
         sp.proc.stdin.write(inputMsg + "\n");
-        return;
+        return true;
       }
       sp.proc.stdin.write(response + "\n");
+      return true;
     } catch (err) {
       this.emitSystemLog(
         "warning",
         sp.sessionId,
         `Failed to write gate response: ${err instanceof Error ? err.message : String(err)}`,
       );
+      return false;
     }
   }
 

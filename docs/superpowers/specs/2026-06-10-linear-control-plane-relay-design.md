@@ -85,5 +85,5 @@ Five hardening fixes applied after dual-review:
 
 **Accepted limitations (not fixed here):**
 
-- (a) `resolveGate` may return `ok` even when delivery to the agent process fails (upstream core gap; finalize path backstops with BLOCKED — tracked upstream).
+- (a) ~~`resolveGate` may return `ok` even when delivery fails~~ **FIXED locally**: `writeGateResponse` now returns `boolean`; on `false` the gate is restored to `gate_status` / `sessions.status='paused'` so the relay retries on the next tick instead of false-settling. The same bug exists in upstream's `resolveGate` (no delivery check) — filed there separately.
 - (b) Receipt comments are at-least-once; a crash between "receipt posted" and "DB column cleared" can mislabel a Linear-resolved gate as "resolved elsewhere" on the next tick (cosmetic — no duplicate resolve, no lost reply).
