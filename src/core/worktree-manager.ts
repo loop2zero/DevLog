@@ -44,6 +44,55 @@ export async function listWorktrees(projectId?: string): Promise<Worktree[]> {
   return entries;
 }
 
+/**
+ * Fetches origin/<baseBranch> so new worktrees start from the remote tip
+ * instead of a stale local branch (chained subtasks otherwise conflict on
+ * every link). Returns "origin/<baseBranch>" on success; falls back to the
+ * local branch when the fetch fails (offline / no remote) so dispatch is
+ * never blocked.
+ */
+export async function resolveWorktreeBase(
+  repoRoot: string,
+  baseBranch: string
+): Promise<string> {
+  try {
+    await execFileAsync("git", ["fetch", "origin", baseBranch], { cwd: repoRoot });
+    await execFileAsync("git", ["rev-parse", "--verify", `origin/${baseBranch}`], {
+      cwd: repoRoot,
+    });
+    return `origin/${baseBranch}`;
+  } catch (err) {
+    console.warn(
+      `[worktree] fetch origin/${baseBranch} failed; falling back to local '${baseBranch}': ${(err as Error).message}`
+    );
+    return baseBranch;
+  }
+}
+
+export async function createWorktreeAt(
+  repoRoot: string,
+  name: string,
+  branch: string,
+  baseBranch?: string
+): Promise<string> {
+  const worktreePath = path.join(repoRoot, ".worktrees", name);
+
+  if (baseBranch) {
+    const base = await resolveWorktreeBase(repoRoot, baseBranch);
+    await execFileAsync(
+      "git",
+      ["worktree", "add", "-b", branch, worktreePath, base],
+      { cwd: repoRoot }
+    );
+  } else {
+    await execFileAsync("git", ["worktree", "add", "-b", branch, worktreePath], {
+      cwd: repoRoot,
+    });
+  }
+
+  return worktreePath;
+}
+
 export async function createWorktree(
   name: string,
   branch: string,
@@ -51,13 +100,7 @@ export async function createWorktree(
   projectId?: string
 ): Promise<Worktree> {
   const repoRoot = getRepoRoot(projectId);
-  const worktreePath = path.join(repoRoot, ".worktrees", name);
-
-  if (baseBranch) {
-    await git(projectId, "worktree", "add", "-b", branch, worktreePath, baseBranch);
-  } else {
-    await git(projectId, "worktree", "add", "-b", branch, worktreePath);
-  }
+  const worktreePath = await createWorktreeAt(repoRoot, name, branch, baseBranch);
 
   const worktrees = await listWorktrees(projectId);
   const created = worktrees.find((w) => w.path === worktreePath);
